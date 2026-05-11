@@ -1,0 +1,10 @@
+[package]
+name = "asdcplib"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe Rust wrapper for asdcplib (AS-DCP/AS-02 MXF read/write)"
+
+[dependencies]
+asdcplib-sys = { path = "../asdcplib-sys" }
+thiserror = "2"

@@ -1,0 +1,3 @@
+[submodule "asdcplib-sys/asdcplib"]
+	path = asdcplib-sys/asdcplib
+	url = https://github.com/cinecert/asdcplib.git
