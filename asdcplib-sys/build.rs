@@ -37,12 +37,11 @@ fn main() {
         } else if let Ok(output) = std::process::Command::new("brew")
             .args(["--prefix", "openssl"])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let openssl_lib = PathBuf::from(&prefix).join("lib");
-                println!("cargo:rustc-link-search=native={}", openssl_lib.display());
-            }
+            let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let openssl_lib = PathBuf::from(&prefix).join("lib");
+            println!("cargo:rustc-link-search=native={}", openssl_lib.display());
         }
     }
 
