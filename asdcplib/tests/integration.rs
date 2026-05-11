@@ -7,10 +7,7 @@ mod tests {
         let v = version();
         assert!(!v.is_empty(), "version string should not be empty");
         // asdcplib versions look like "2.12.X" or similar
-        assert!(
-            v.contains('.'),
-            "version string should contain a dot: {v}"
-        );
+        assert!(v.contains('.'), "version string should contain a dot: {v}");
     }
 
     #[test]
@@ -88,8 +85,8 @@ mod tests {
 
 #[cfg(test)]
 mod crypto_tests {
-    use asdcplib::crypto::*;
     use asdcplib::LabelSet;
+    use asdcplib::crypto::*;
 
     #[test]
     fn test_aes_enc_context_init() {
