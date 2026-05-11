@@ -24,9 +24,8 @@ mod tests {
     fn test_raw_essence_type_nonexistent_file() {
         let result = raw_essence_type("/nonexistent/file.j2c");
         // raw_essence_type returns Ok(Unknown) for files it can't identify
-        match result {
-            Ok(t) => assert_eq!(t, EssenceType::Unknown),
-            Err(_) => {} // also acceptable
+        if let Ok(t) = result {
+            assert_eq!(t, EssenceType::Unknown);
         }
     }
 
@@ -61,15 +60,17 @@ mod tests {
 
     #[test]
     fn test_writer_info_fields() {
-        let mut info = WriterInfo::default();
-        info.asset_uuid = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        info.encrypted_essence = true;
-        info.uses_hmac = true;
-        info.label_set = LabelSet::Interop;
+        let info = WriterInfo {
+            asset_uuid: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            encrypted_essence: true,
+            uses_hmac: true,
+            label_set: LabelSet::Interop,
+            ..Default::default()
+        };
 
         assert_eq!(info.asset_uuid[0], 1);
-        assert_eq!(info.encrypted_essence, true);
-        assert_eq!(info.uses_hmac, true);
+        assert!(info.encrypted_essence);
+        assert!(info.uses_hmac);
         assert_eq!(info.label_set, LabelSet::Interop);
     }
 
