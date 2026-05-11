@@ -29,6 +29,23 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=ssl");
     println!("cargo:rustc-link-lib=dylib=crypto");
 
+    // On macOS, OpenSSL from Homebrew is not in the default search path
+    if cfg!(target_os = "macos") {
+        if let Ok(openssl_dir) = env::var("OPENSSL_DIR") {
+            let openssl_lib = PathBuf::from(&openssl_dir).join("lib");
+            println!("cargo:rustc-link-search=native={}", openssl_lib.display());
+        } else if let Ok(output) = std::process::Command::new("brew")
+            .args(["--prefix", "openssl"])
+            .output()
+        {
+            if output.status.success() {
+                let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let openssl_lib = PathBuf::from(&prefix).join("lib");
+                println!("cargo:rustc-link-search=native={}", openssl_lib.display());
+            }
+        }
+    }
+
     // Check for xerces-c (optional, for timed text)
     if pkg_config::probe_library("xerces-c").is_ok() {
         println!("cargo:rustc-link-lib=dylib=xerces-c");
