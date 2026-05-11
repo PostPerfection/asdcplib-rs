@@ -57,19 +57,19 @@ fn main() {
     }
 
     // On Windows, set vcpkg library search path
-    if is_windows {
-        if let Ok(vcpkg_root) = env::var("VCPKG_ROOT") {
-            let vcpkg_lib = PathBuf::from(&vcpkg_root).join("installed/x64-windows/lib");
-            println!("cargo:rustc-link-search=native={}", vcpkg_lib.display());
-        }
+    if is_windows
+        && let Ok(vcpkg_root) = env::var("VCPKG_ROOT")
+    {
+        let vcpkg_lib = PathBuf::from(&vcpkg_root).join("installed/x64-windows/lib");
+        println!("cargo:rustc-link-search=native={}", vcpkg_lib.display());
     }
 
     // Check for xerces-c (optional, for timed text)
     // pkg-config is not available on Windows; vcpkg handles linking via CMake
-    if !is_windows {
-        if pkg_config::probe_library("xerces-c").is_ok() {
-            println!("cargo:rustc-link-lib=dylib=xerces-c");
-        }
+    if !is_windows
+        && pkg_config::probe_library("xerces-c").is_ok()
+    {
+        println!("cargo:rustc-link-lib=dylib=xerces-c");
     }
 
     // Compile our C++ shim
