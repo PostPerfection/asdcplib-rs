@@ -31,6 +31,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install cmake openssl xerces-c
+          echo "OPENSSL_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix xerces-c):$(brew --prefix openssl)" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'

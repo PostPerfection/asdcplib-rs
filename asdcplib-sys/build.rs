@@ -8,6 +8,7 @@ fn main() {
     let asdcp_dst = cmake::Config::new("asdcplib")
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON")
+        .define("CMAKE_POLICY_VERSION_MINIMUM", "3.5")
         .build();
 
     let asdcp_lib = asdcp_dst.join("lib");
@@ -44,7 +45,13 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=asdcp_shim");
-    println!("cargo:rustc-link-lib=dylib=stdc++");
+
+    // macOS uses libc++, Linux uses libstdc++
+    if cfg!(target_os = "macos") {
+        println!("cargo:rustc-link-lib=dylib=c++");
+    } else {
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+    }
 
     println!("cargo:rerun-if-changed=shim/asdcp_shim.h");
     println!("cargo:rerun-if-changed=shim/asdcp_shim.cpp");
