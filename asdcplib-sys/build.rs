@@ -51,6 +51,8 @@ fn main() {
         // Windows socket libraries required by OpenSSL/asdcplib
         println!("cargo:rustc-link-lib=dylib=ws2_32");
         println!("cargo:rustc-link-lib=dylib=crypt32");
+        // Advapi32 provides CryptAcquireContext/CryptGenRandom used by KM_prng
+        println!("cargo:rustc-link-lib=dylib=Advapi32");
     } else {
         println!("cargo:rustc-link-lib=dylib=ssl");
         println!("cargo:rustc-link-lib=dylib=crypto");
