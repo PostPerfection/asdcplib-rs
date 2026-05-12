@@ -21,12 +21,28 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", asdcp_lib.display());
     println!("cargo:rustc-link-search=native={}", asdcp_lib64.display());
 
+    // On Windows MSVC multi-config generators, libraries may land in a
+    // per-configuration subdirectory (e.g. lib/Debug or lib/Release).
+    if is_windows {
+        for sub in &["Debug", "Release", "RelWithDebInfo", "MinSizeRel"] {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                asdcp_lib.join(sub).display()
+            );
+        }
+    }
+
     // asdcplib cmake uses _d suffix for debug builds
     let profile = env::var("PROFILE").unwrap_or_default();
     let suffix = if profile == "debug" { "_d" } else { "" };
 
-    println!("cargo:rustc-link-lib=static=asdcp{suffix}");
-    println!("cargo:rustc-link-lib=static=kumu{suffix}");
+    // The CMake targets are named "libasdcp" / "libkumu" with PREFIX "".
+    // On Linux, the linker auto-prepends "lib", so linking "asdcp_d" finds "libasdcp_d.a".
+    // On Windows MSVC, there is no auto-prefix, so we must use the full name "libasdcp_d".
+    let prefix = if is_windows { "lib" } else { "" };
+
+    println!("cargo:rustc-link-lib=static={prefix}asdcp{suffix}");
+    println!("cargo:rustc-link-lib=static={prefix}kumu{suffix}");
 
     if is_windows {
         // On Windows (vcpkg), OpenSSL libraries have different names
