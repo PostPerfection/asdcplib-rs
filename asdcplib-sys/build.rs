@@ -75,9 +75,16 @@ fn main() {
     }
 
     // On Windows, set vcpkg library search path
-    if is_windows && let Ok(vcpkg_root) = env::var("VCPKG_ROOT") {
-        let vcpkg_lib = PathBuf::from(&vcpkg_root).join("installed/x64-windows/lib");
-        println!("cargo:rustc-link-search=native={}", vcpkg_lib.display());
+    if is_windows {
+        if let Ok(lib_dir) = env::var("OPENSSL_LIB_DIR") {
+            println!("cargo:rustc-link-search=native={lib_dir}");
+        } else if let Ok(openssl_dir) = env::var("OPENSSL_DIR") {
+            let openssl_lib = PathBuf::from(&openssl_dir).join("lib");
+            println!("cargo:rustc-link-search=native={}", openssl_lib.display());
+        } else if let Ok(vcpkg_root) = env::var("VCPKG_ROOT") {
+            let vcpkg_lib = PathBuf::from(&vcpkg_root).join("installed/x64-windows/lib");
+            println!("cargo:rustc-link-search=native={}", vcpkg_lib.display());
+        }
     }
 
     // Check for xerces-c (optional, for timed text)
