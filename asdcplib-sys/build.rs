@@ -6,11 +6,26 @@ fn main() {
     let is_windows = cfg!(target_os = "windows");
 
     // Build asdcplib from source via CMake
-    let asdcp_dst = cmake::Config::new("asdcplib")
+    let mut cmake_cfg = cmake::Config::new("asdcplib");
+    cmake_cfg
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON")
-        .define("CMAKE_POLICY_VERSION_MINIMUM", "3.5")
-        .build();
+        .define("CMAKE_POLICY_VERSION_MINIMUM", "3.5");
+
+    // Auto-detect vcpkg toolchain file on Windows so CMake can find OpenSSL
+    if is_windows && env::var("CMAKE_TOOLCHAIN_FILE").is_err() {
+        for var in ["VCPKG_ROOT", "VCPKG_INSTALLATION_ROOT"] {
+            if let Ok(root) = env::var(var) {
+                let toolchain = PathBuf::from(&root).join("scripts/buildsystems/vcpkg.cmake");
+                if toolchain.exists() {
+                    cmake_cfg.define("CMAKE_TOOLCHAIN_FILE", &toolchain);
+                    break;
+                }
+            }
+        }
+    }
+
+    let asdcp_dst = cmake_cfg.build();
 
     let asdcp_lib = asdcp_dst.join("lib");
     let asdcp_include = asdcp_dst.join("include");
