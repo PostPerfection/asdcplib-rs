@@ -1,4 +1,4 @@
-//! Safe Rust wrapper for asdcplib — AS-DCP and AS-02 MXF file access.
+//! Safe Rust wrapper for asdcplib — AS-DCP MXF read/write, with AS-02/IMF essence detection.
 //!
 //! Provides safe abstractions over the raw FFI bindings in `asdcplib-sys`.
 //!

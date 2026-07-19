@@ -4,7 +4,7 @@
 
 [Documentation](https://postperfection.github.io/asdcplib-rs/)
 
-Rust FFI bindings for [asdcplib](https://github.com/cinecert/asdcplib), the AS-DCP and AS-02 MXF file access library used in Digital Cinema.
+Rust FFI bindings for [asdcplib](https://github.com/cinecert/asdcplib), the MXF file access library used in Digital Cinema. These bindings cover AS-DCP (ST 429) read/write; AS-02/IMF essence is recognized by `essence_type` but has no reader/writer yet.
 
 ## Crates
 
