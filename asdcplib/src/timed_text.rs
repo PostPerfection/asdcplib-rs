@@ -187,7 +187,7 @@ impl MxfReader {
         let dec_ptr = dec_ctx.map_or(std::ptr::null_mut(), |c| c.as_mut_ptr());
         let hmac_ptr = hmac_ctx.map_or(std::ptr::null_mut(), |c| c.as_mut_ptr());
         let mut out_size: u32 = 0;
-        error::check(unsafe {
+        let result = unsafe {
             asdcplib_sys::asdcp_timed_text_reader_read_timed_text_resource(
                 self.ptr,
                 buf.as_mut_ptr(),
@@ -196,7 +196,15 @@ impl MxfReader {
                 dec_ptr,
                 hmac_ptr,
             )
-        })?;
+        };
+        // on a short buffer the shim leaves buf untouched and reports the size needed
+        if result == asdcplib_sys::RESULT_SMALLBUF {
+            return Err(crate::Error::BufferTooSmall {
+                needed: out_size as usize,
+                capacity: buf.len(),
+            });
+        }
+        error::check(result)?;
         Ok(out_size as usize)
     }
 }

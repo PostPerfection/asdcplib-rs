@@ -122,9 +122,21 @@ pub const ESS_TIMED_TEXT: AsdcpEssenceType = 5;
 pub const ESS_JPEG_2000_S: AsdcpEssenceType = 6;
 pub const ESS_DCDATA_UNKNOWN: AsdcpEssenceType = 7;
 pub const ESS_DCDATA_DOLBY_ATMOS: AsdcpEssenceType = 8;
+pub const ESS_AS02_JPEG_2000: AsdcpEssenceType = 9;
+pub const ESS_AS02_PCM_24B_48K: AsdcpEssenceType = 10;
+pub const ESS_AS02_PCM_24B_96K: AsdcpEssenceType = 11;
+pub const ESS_AS02_TIMED_TEXT: AsdcpEssenceType = 12;
+pub const ESS_AS02_ISXD: AsdcpEssenceType = 13;
+pub const ESS_AS02_ACES: AsdcpEssenceType = 14;
+pub const ESS_AS02_IAB: AsdcpEssenceType = 15;
+pub const ESS_AS02_JPEG_XS: AsdcpEssenceType = 16;
+pub const ESS_JPEG_XS: AsdcpEssenceType = 17;
 
 /// Result type (negative = error).
 pub type AsdcpResult = c_int;
+
+/// Kumu::RESULT_SMALLBUF, "The given buffer is too small."
+pub const RESULT_SMALLBUF: AsdcpResult = -7;
 
 unsafe extern "C" {
     // ---- Version ----

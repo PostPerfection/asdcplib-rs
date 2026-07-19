@@ -454,10 +454,13 @@ asdcp_result_t asdcp_timed_text_reader_read_timed_text_resource(asdcp_timed_text
         static_cast<ASDCP::HMACContext*>(hmac_ctx)
     );
     if (ASDCP_SUCCESS(result.Value())) {
-        uint32_t copy_len = static_cast<uint32_t>(doc.size());
-        if (copy_len > buf_capacity) copy_len = buf_capacity;
-        memcpy(buf, doc.data(), copy_len);
-        *out_size = copy_len;
+        uint32_t doc_len = static_cast<uint32_t>(doc.size());
+        // report the size the caller needs, even when we can't deliver the bytes
+        *out_size = doc_len;
+        if (doc_len > buf_capacity) {
+            return ASDCP::RESULT_SMALLBUF.Value();
+        }
+        memcpy(buf, doc.data(), doc_len);
     } else {
         *out_size = 0;
     }

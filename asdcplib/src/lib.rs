@@ -40,6 +40,7 @@ pub enum LabelSet {
 pub enum EssenceType {
     Unknown,
     Mpeg2Ves,
+    // d-cinema (AS-DCP)
     Jpeg2000,
     Pcm24b48k,
     Pcm24b96k,
@@ -47,19 +48,40 @@ pub enum EssenceType {
     Jpeg2000Stereo,
     DcDataUnknown,
     DcDataDolbyAtmos,
+    // IMF (AS-02)
+    As02Jpeg2000,
+    As02Pcm24b48k,
+    As02Pcm24b96k,
+    As02TimedText,
+    As02Isxd,
+    As02Aces,
+    As02Iab,
+    As02JpegXs,
+    // experimental: JPEG XS in an AS-DCP wrapping
+    JpegXs,
 }
 
 impl From<i32> for EssenceType {
     fn from(v: i32) -> Self {
+        use asdcplib_sys as sys;
         match v {
-            1 => EssenceType::Mpeg2Ves,
-            2 => EssenceType::Jpeg2000,
-            3 => EssenceType::Pcm24b48k,
-            4 => EssenceType::Pcm24b96k,
-            5 => EssenceType::TimedText,
-            6 => EssenceType::Jpeg2000Stereo,
-            7 => EssenceType::DcDataUnknown,
-            8 => EssenceType::DcDataDolbyAtmos,
+            sys::ESS_MPEG2_VES => EssenceType::Mpeg2Ves,
+            sys::ESS_JPEG_2000 => EssenceType::Jpeg2000,
+            sys::ESS_PCM_24B_48K => EssenceType::Pcm24b48k,
+            sys::ESS_PCM_24B_96K => EssenceType::Pcm24b96k,
+            sys::ESS_TIMED_TEXT => EssenceType::TimedText,
+            sys::ESS_JPEG_2000_S => EssenceType::Jpeg2000Stereo,
+            sys::ESS_DCDATA_UNKNOWN => EssenceType::DcDataUnknown,
+            sys::ESS_DCDATA_DOLBY_ATMOS => EssenceType::DcDataDolbyAtmos,
+            sys::ESS_AS02_JPEG_2000 => EssenceType::As02Jpeg2000,
+            sys::ESS_AS02_PCM_24B_48K => EssenceType::As02Pcm24b48k,
+            sys::ESS_AS02_PCM_24B_96K => EssenceType::As02Pcm24b96k,
+            sys::ESS_AS02_TIMED_TEXT => EssenceType::As02TimedText,
+            sys::ESS_AS02_ISXD => EssenceType::As02Isxd,
+            sys::ESS_AS02_ACES => EssenceType::As02Aces,
+            sys::ESS_AS02_IAB => EssenceType::As02Iab,
+            sys::ESS_AS02_JPEG_XS => EssenceType::As02JpegXs,
+            sys::ESS_JPEG_XS => EssenceType::JpegXs,
             _ => EssenceType::Unknown,
         }
     }
