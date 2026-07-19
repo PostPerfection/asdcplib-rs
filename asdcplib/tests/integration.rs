@@ -165,6 +165,7 @@ mod jp2k_tests {
 #[cfg(test)]
 mod pcm_tests {
     use asdcplib::pcm::*;
+    use asdcplib::{Rational, WriterInfo};
 
     #[test]
     fn test_pcm_reader_open_nonexistent() {
@@ -178,6 +179,65 @@ mod pcm_tests {
         assert_eq!(ChannelFormat::None as i32, 0);
         assert_eq!(ChannelFormat::Cfg1 as i32, 1);
         assert_eq!(ChannelFormat::Cfg3 as i32, 3);
+    }
+
+    #[test]
+    fn test_pcm_roundtrip() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "asdcplib-pcm-roundtrip-{}-{unique}.mxf",
+            std::process::id()
+        ));
+        let path_string = path.to_string_lossy().to_string();
+        let descriptor = AudioDescriptor {
+            edit_rate: Rational::new(24, 1),
+            audio_sampling_rate: Rational::new(48_000, 1),
+            locked: true,
+            channel_count: 6,
+            quantization_bits: 24,
+            block_align: 18,
+            avg_bps: 864_000,
+            linked_track_id: 0,
+            container_duration: 1,
+            channel_format: ChannelFormat::Cfg1,
+        };
+        let info = WriterInfo {
+            product_uuid: [1; 16],
+            asset_uuid: [2; 16],
+            context_id: [3; 16],
+            ..Default::default()
+        };
+        let frame = vec![0x5a; 36_000];
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &info, &descriptor, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            let actual_descriptor = reader.audio_descriptor().unwrap();
+            assert_eq!(actual_descriptor.channel_count, 6);
+            assert_eq!(
+                actual_descriptor.audio_sampling_rate,
+                Rational::new(48_000, 1)
+            );
+            let mut output = vec![0; frame.len()];
+            let size = reader.read_frame(0, &mut output, None, None).unwrap();
+            assert_eq!(size, frame.len());
+            assert_eq!(&output[..size], frame.as_slice());
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
     }
 }
 

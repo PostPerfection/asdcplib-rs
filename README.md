@@ -1,6 +1,10 @@
 # asdcplib-rs
 
-Rust FFI bindings for [asdcplib](https://github.com/cinecert/asdcplib) — the AS-DCP and AS-02 MXF file access library used in Digital Cinema.
+[![CI](https://github.com/PostPerfection/asdcplib-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/PostPerfection/asdcplib-rs/actions/workflows/ci.yml)
+
+[Documentation](https://postperfection.github.io/asdcplib-rs/)
+
+Rust FFI bindings for [asdcplib](https://github.com/cinecert/asdcplib), the AS-DCP and AS-02 MXF file access library used in Digital Cinema.
 
 ## Crates
 
@@ -20,7 +24,7 @@ Rust FFI bindings for [asdcplib](https://github.com/cinecert/asdcplib) — the A
 
 ```toml
 [dependencies]
-asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", branch = "master" }
+asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", tag = "v0.1.0" }
 ```
 
 ```rust
@@ -47,12 +51,15 @@ let size = reader.read_frame(0, &mut buf, None, None)?;
 
 ## Building
 
-The `asdcplib-sys` crate expects the asdcplib source tree at `asdcplib-sys/asdcplib/`. Clone it as a submodule:
+The `asdcplib-sys` crate expects the asdcplib source tree at `asdcplib-sys/asdcplib/`:
 
 ```bash
-git submodule add https://github.com/cinecert/asdcplib.git asdcplib-sys/asdcplib
+git submodule update --init --recursive
 cargo build
+cargo test
 ```
+
+The integration suite writes and reads a real PCM MXF to verify the safe wrapper and C++ library together.
 
 ## License
 
