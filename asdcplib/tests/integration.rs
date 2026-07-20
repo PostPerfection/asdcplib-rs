@@ -322,7 +322,12 @@ mod jp2k_tests {
         {
             let mut writer = MxfWriter::new();
             writer
-                .open_write(&path_string, &info, &descriptor(frames.len() as u32), 16_384)
+                .open_write(
+                    &path_string,
+                    &info,
+                    &descriptor(frames.len() as u32),
+                    16_384,
+                )
                 .unwrap();
             let mut enc = AesEncContext::new();
             enc.init_key(&key).unwrap();
