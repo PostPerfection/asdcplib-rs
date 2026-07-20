@@ -293,6 +293,130 @@ mod jp2k_tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    /// Encrypt with AES + HMAC on write, decrypt on read, and prove the
+    /// plaintext survives byte-exact. Also proves a wrong or missing key
+    /// cannot recover it: the check value and the HMAC both reject a bad key.
+    #[test]
+    fn test_jp2k_encrypted_roundtrip() {
+        use asdcplib::LabelSet;
+        use asdcplib::crypto::{AesDecContext, AesEncContext, HmacContext};
+
+        let path = crate::util::temp_path("jp2k-encrypted-roundtrip");
+        let path_string = path.to_string_lossy().to_string();
+
+        let key = [0x2b; 16];
+        let ivec = [0x9c; 16];
+        let info = WriterInfo {
+            asset_uuid: [8; 16],
+            context_id: [0xc7; 16],
+            cryptographic_key_id: [0xd4; 16],
+            encrypted_essence: true,
+            uses_hmac: true,
+            ..Default::default()
+        };
+        // distinct payloads and lengths so a frame mix-up cannot pass
+        let frames: Vec<Vec<u8>> = (0..3)
+            .map(|i| crate::util::synthetic_j2c(i as u8 * 40 + 1, 4096 + i * 32))
+            .collect();
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &info, &descriptor(frames.len() as u32), 16_384)
+                .unwrap();
+            let mut enc = AesEncContext::new();
+            enc.init_key(&key).unwrap();
+            enc.set_ivec(&ivec).unwrap();
+            let mut hmac = HmacContext::new();
+            hmac.init_key(&key, LabelSet::Smpte).unwrap();
+            for frame in &frames {
+                writer
+                    .write_frame(frame, Some(&mut enc), Some(&mut hmac))
+                    .unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        // header advertises the essence as encrypted + integrity-protected
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            let read_info = reader.writer_info().unwrap();
+            assert!(read_info.encrypted_essence);
+            assert!(read_info.uses_hmac);
+            reader.close().unwrap();
+        }
+
+        // correct key + hmac: every frame comes back byte-identical
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            let mut dec = AesDecContext::new();
+            dec.init_key(&key).unwrap();
+            let mut hmac = HmacContext::new();
+            hmac.init_key(&key, LabelSet::Smpte).unwrap();
+            for (i, expected) in frames.iter().enumerate() {
+                let mut buf = vec![0u8; 8192];
+                let size = reader
+                    .read_frame(i as u32, &mut buf, Some(&mut dec), Some(&mut hmac))
+                    .unwrap();
+                assert_eq!(size, expected.len(), "frame {i} length");
+                assert_eq!(&buf[..size], expected.as_slice(), "frame {i} bytes");
+            }
+            reader.close().unwrap();
+        }
+
+        // wrong decryption key: the encrypted check value rejects it
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            let mut dec = AesDecContext::new();
+            dec.init_key(&[0xff; 16]).unwrap();
+            let mut hmac = HmacContext::new();
+            hmac.init_key(&key, LabelSet::Smpte).unwrap();
+            let mut buf = vec![0u8; 8192];
+            assert!(
+                reader
+                    .read_frame(0, &mut buf, Some(&mut dec), Some(&mut hmac))
+                    .is_err()
+            );
+            reader.close().unwrap();
+        }
+
+        // right decryption key but wrong hmac key: integrity check rejects it
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            let mut dec = AesDecContext::new();
+            dec.init_key(&key).unwrap();
+            let mut hmac = HmacContext::new();
+            hmac.init_key(&[0xff; 16], LabelSet::Smpte).unwrap();
+            let mut buf = vec![0u8; 8192];
+            assert!(
+                reader
+                    .read_frame(0, &mut buf, Some(&mut dec), Some(&mut hmac))
+                    .is_err()
+            );
+            reader.close().unwrap();
+        }
+
+        // no key at all: the read returns ciphertext, never the plaintext
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            let mut buf = vec![0u8; 8192];
+            let size = reader.read_frame(0, &mut buf, None, None).unwrap();
+            assert_ne!(
+                &buf[..size],
+                frames[0].as_slice(),
+                "ciphertext must not equal plaintext"
+            );
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn test_jp2k_stereo_roundtrip() {
         let path = crate::util::temp_path("jp2k-stereo-roundtrip");
