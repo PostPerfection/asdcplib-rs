@@ -1,12 +1,20 @@
-//! Safe Rust wrapper for asdcplib — AS-DCP MXF read/write, with AS-02/IMF essence detection.
+//! Safe Rust wrapper for asdcplib — AS-DCP (ST 429) and AS-02 (IMF, ST 2067-5) MXF read/write.
 //!
 //! Provides safe abstractions over the raw FFI bindings in `asdcplib-sys`.
 //!
 //! # Supported essence types
+//! AS-DCP (d-cinema) read/write:
 //! - JPEG 2000 (mono and stereoscopic 3D)
 //! - PCM audio (24-bit, 48kHz and 96kHz)
 //! - Timed Text (SMPTE ST 429-5)
 //! - Dolby Atmos (IAB)
+//!
+//! AS-02 (IMF) read/write, in the [`as02`] module:
+//! - JPEG 2000 (frame-wrapped)
+//! - PCM audio (clip-wrapped)
+//! - Timed Text (SMPTE ST 2067-2)
+//!
+//! Other AS-02 essence (ISXD, ACES, IAB, JPEG XS) is detection-only via [`essence_type`].
 //!
 //! # Example
 //! ```no_run
@@ -16,6 +24,7 @@
 //! assert_eq!(etype, EssenceType::Jpeg2000);
 //! ```
 
+pub mod as02;
 pub mod atmos;
 pub mod crypto;
 mod error;

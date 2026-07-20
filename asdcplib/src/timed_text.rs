@@ -14,7 +14,7 @@ pub struct TimedTextDescriptor {
 }
 
 impl TimedTextDescriptor {
-    fn to_ffi(&self) -> asdcplib_sys::AsdcpTimedTextDescriptor {
+    pub(crate) fn to_ffi(&self) -> asdcplib_sys::AsdcpTimedTextDescriptor {
         asdcplib_sys::AsdcpTimedTextDescriptor {
             edit_rate: self.edit_rate.to_ffi(),
             container_duration: self.container_duration,
@@ -22,7 +22,7 @@ impl TimedTextDescriptor {
         }
     }
 
-    fn from_ffi(ffi: &asdcplib_sys::AsdcpTimedTextDescriptor) -> Self {
+    pub(crate) fn from_ffi(ffi: &asdcplib_sys::AsdcpTimedTextDescriptor) -> Self {
         Self {
             edit_rate: Rational::from_ffi(&ffi.edit_rate),
             container_duration: ffi.container_duration,

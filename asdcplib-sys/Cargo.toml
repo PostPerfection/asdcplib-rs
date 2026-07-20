@@ -3,7 +3,7 @@ name = "asdcplib-sys"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Raw FFI bindings to asdcplib (AS-DCP MXF read/write)"
+description = "Raw FFI bindings to asdcplib (AS-DCP and AS-02/IMF MXF read/write)"
 links = "asdcp"
 build = "build.rs"
 

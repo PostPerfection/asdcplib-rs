@@ -4,14 +4,14 @@
 
 [Documentation](https://postperfection.github.io/asdcplib-rs/)
 
-Rust FFI bindings for [asdcplib](https://github.com/cinecert/asdcplib), the MXF file access library used in Digital Cinema. These bindings cover AS-DCP (ST 429) read/write; AS-02/IMF essence is recognized by `essence_type` but has no reader/writer yet.
+Rust FFI bindings for [asdcplib](https://github.com/cinecert/asdcplib), the MXF file access library used in Digital Cinema. These bindings cover AS-DCP (ST 429) and AS-02/IMF (ST 2067-5) read/write.
 
 ## Crates
 
 | Crate | Description |
 |---|---|
 | `asdcplib-sys` | Raw FFI bindings with C shim, builds asdcplib from source via CMake |
-| `asdcplib` | Safe Rust wrapper with typed readers/writers for JP2K, PCM, TimedText, Atmos |
+| `asdcplib` | Safe Rust wrapper with typed readers/writers for AS-DCP and AS-02 JP2K, PCM, TimedText, plus AS-DCP Atmos |
 
 ## Prerequisites
 
@@ -44,10 +44,20 @@ let size = reader.read_frame(0, &mut buf, None, None)?;
 
 ## Supported Essence Types
 
+AS-DCP (d-cinema, ST 429) read/write:
+
 - JPEG 2000 (mono + stereoscopic 3D)
 - PCM audio (24-bit, 48kHz / 96kHz)
 - Timed Text (SMPTE ST 429-5)
 - Dolby Atmos (IAB)
+
+AS-02 (IMF, ST 2067-5) read/write, in the `as02` module:
+
+- JPEG 2000 (frame-wrapped)
+- PCM audio (clip-wrapped)
+- Timed Text (SMPTE ST 2067-2)
+
+Other AS-02 essence (ISXD, ACES, IAB, JPEG XS) is detection-only via `essence_type`.
 
 ## Building
 

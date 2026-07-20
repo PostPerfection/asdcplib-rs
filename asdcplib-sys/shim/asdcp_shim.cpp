@@ -1,9 +1,29 @@
 /* asdcplib C shim implementation */
 #include "asdcp_shim.h"
 #include <AS_DCP.h>
+#include <AS_02.h>
+#include <Metadata.h>
+#include <MDD.h>
 #include <KM_fileio.h>
 #include <cstring>
 #include <string>
+#include <list>
+
+/* Internal descriptor converters live in AS_DCP_internal.h, which is not part
+   of the public include surface. Forward-declare them exactly as the upstream
+   as-02-wrap / as-02-unwrap tools do so the linker resolves them. */
+namespace ASDCP {
+  Kumu::Result_t JP2K_PDesc_to_MD(const ASDCP::JP2K::PictureDescriptor& PDesc,
+                                  const ASDCP::Dictionary& dict,
+                                  ASDCP::MXF::GenericPictureEssenceDescriptor& EssenceDescriptor,
+                                  ASDCP::MXF::JPEG2000PictureSubDescriptor& EssenceSubDescriptor);
+  Kumu::Result_t MD_to_JP2K_PDesc(const ASDCP::MXF::GenericPictureEssenceDescriptor& EssenceDescriptor,
+                                  const ASDCP::MXF::JPEG2000PictureSubDescriptor& EssenceSubDescriptor,
+                                  const ASDCP::Rational& EditRate, const ASDCP::Rational& SampleRate,
+                                  ASDCP::JP2K::PictureDescriptor& PDesc);
+  Kumu::Result_t PCM_ADesc_to_MD(ASDCP::PCM::AudioDescriptor& ADesc, ASDCP::MXF::WaveAudioDescriptor* ADescObj);
+  Kumu::Result_t MD_to_PCM_ADesc(ASDCP::MXF::WaveAudioDescriptor* ADescObj, ASDCP::PCM::AudioDescriptor& ADesc);
+}
 
 /* Helper: convert C writer info to C++ WriterInfo */
 static void c_to_cpp_writer_info(const asdcp_writer_info_t* c, ASDCP::WriterInfo& cpp) {
@@ -639,6 +659,378 @@ asdcp_result_t asdcp_jp2k_s_reader_read_frame(asdcp_jp2k_s_reader_t r, uint32_t 
         static_cast<ASDCP::HMACContext*>(hmac_ctx)
     );
     *out_size = fb.Size();
+    return result.Value();
+}
+
+/* ================= AS-02 (IMF / ST 2067-5) ================= */
+
+/* ---- AS-02 JP2K Writer ---- */
+asdcp_as02_jp2k_writer_t asdcp_as02_jp2k_writer_new(void) {
+    return new AS_02::JP2K::MXFWriter();
+}
+
+void asdcp_as02_jp2k_writer_free(asdcp_as02_jp2k_writer_t w) {
+    delete static_cast<AS_02::JP2K::MXFWriter*>(w);
+}
+
+asdcp_result_t asdcp_as02_jp2k_writer_open_write(asdcp_as02_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc, uint32_t header_size) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    wi.LabelSetType = ASDCP::LS_MXF_SMPTE; // AS-02 is SMPTE-only
+
+    ASDCP::JP2K::PictureDescriptor pd;
+    c_to_cpp_picture_desc(desc, pd);
+
+    // Build an RGBA essence descriptor plus a JPEG2000 picture sub-descriptor.
+    // The writer takes ownership of both (see AS_02_JP2K.cpp: *i = 0).
+    ASDCP::MXF::RGBAEssenceDescriptor* ed = new ASDCP::MXF::RGBAEssenceDescriptor(dict);
+    ASDCP::MXF::InterchangeObject_list_t subs;
+    subs.push_back(new ASDCP::MXF::JPEG2000PictureSubDescriptor(dict));
+
+    ASDCP::Result_t result = ASDCP::JP2K_PDesc_to_MD(
+        pd, *dict,
+        *static_cast<ASDCP::MXF::GenericPictureEssenceDescriptor*>(ed),
+        *static_cast<ASDCP::MXF::JPEG2000PictureSubDescriptor*>(subs.back()));
+
+    if (ASDCP_FAILURE(result)) {
+        delete ed;
+        for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
+            delete *i;
+        }
+        return result.Value();
+    }
+
+    ed->PictureEssenceCoding = ASDCP::UL(dict->ul(ASDCP::MDD_JP2KEssenceCompression_BroadcastProfile_1));
+    ed->ScanningDirection = 0;
+    ed->PixelLayout = ASDCP::MXF::RGBALayout(ASDCP::MXF::RGBAValue_RGB_8);
+
+    ASDCP::MXF::FileDescriptor* fd = static_cast<ASDCP::MXF::FileDescriptor*>(ed);
+    return static_cast<AS_02::JP2K::MXFWriter*>(w)->OpenWrite(
+        std::string(filename), wi, fd, subs, pd.EditRate, header_size).Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_writer_write_frame(asdcp_as02_jp2k_writer_t w,
+    const uint8_t* frame_data, uint32_t frame_size,
+    asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx) {
+    ASDCP::JP2K::FrameBuffer fb;
+    fb.SetData(const_cast<uint8_t*>(frame_data), frame_size);
+    fb.Size(frame_size);
+    return static_cast<AS_02::JP2K::MXFWriter*>(w)->WriteFrame(
+        fb,
+        static_cast<ASDCP::AESEncContext*>(enc_ctx),
+        static_cast<ASDCP::HMACContext*>(hmac_ctx)
+    ).Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_writer_finalize(asdcp_as02_jp2k_writer_t w) {
+    return static_cast<AS_02::JP2K::MXFWriter*>(w)->Finalize().Value();
+}
+
+/* ---- AS-02 JP2K Reader ---- */
+asdcp_as02_jp2k_reader_t asdcp_as02_jp2k_reader_new(void) {
+    Kumu::FileReaderFactory defaultFactory;
+    return new AS_02::JP2K::MXFReader(defaultFactory);
+}
+
+void asdcp_as02_jp2k_reader_free(asdcp_as02_jp2k_reader_t r) {
+    delete static_cast<AS_02::JP2K::MXFReader*>(r);
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_open_read(asdcp_as02_jp2k_reader_t r, const char* filename) {
+    return static_cast<AS_02::JP2K::MXFReader*>(r)->OpenRead(std::string(filename)).Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_close(asdcp_as02_jp2k_reader_t r) {
+    return static_cast<AS_02::JP2K::MXFReader*>(r)->Close().Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_fill_picture_descriptor(asdcp_as02_jp2k_reader_t r, asdcp_picture_descriptor_t* desc) {
+    AS_02::JP2K::MXFReader* reader = static_cast<AS_02::JP2K::MXFReader*>(r);
+    const ASDCP::Dictionary& dict = ASDCP::DefaultCompositeDict();
+
+    // AS-02 JP2K readers expose no FillPictureDescriptor, so reconstruct the
+    // descriptor from header metadata like the upstream as-02-info tool does.
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(dict.ul(ASDCP::MDD_RGBAEssenceDescriptor), &obj);
+    ASDCP::MXF::GenericPictureEssenceDescriptor* ed =
+        dynamic_cast<ASDCP::MXF::RGBAEssenceDescriptor*>(obj);
+    if (ed == 0) {
+        obj = 0;
+        reader->OP1aHeader().GetMDObjectByType(dict.ul(ASDCP::MDD_CDCIEssenceDescriptor), &obj);
+        ed = dynamic_cast<ASDCP::MXF::CDCIEssenceDescriptor*>(obj);
+    }
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    ASDCP::MXF::InterchangeObject* sub_obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(dict.ul(ASDCP::MDD_JPEG2000PictureSubDescriptor), &sub_obj);
+    ASDCP::MXF::JPEG2000PictureSubDescriptor* sub =
+        dynamic_cast<ASDCP::MXF::JPEG2000PictureSubDescriptor*>(sub_obj);
+    if (sub == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    std::list<ASDCP::MXF::InterchangeObject*> tracks;
+    reader->OP1aHeader().GetMDObjectsByType(dict.ul(ASDCP::MDD_Track), tracks);
+    ASDCP::Rational edit_rate;
+    if (!tracks.empty()) {
+        edit_rate = static_cast<ASDCP::MXF::Track*>(tracks.front())->EditRate;
+    }
+
+    ASDCP::JP2K::PictureDescriptor pd;
+    ASDCP::Result_t result = ASDCP::MD_to_JP2K_PDesc(*ed, *sub, edit_rate, ed->SampleRate, pd);
+    if (ASDCP_SUCCESS(result)) {
+        cpp_to_c_picture_desc(pd, desc);
+    }
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_fill_writer_info(asdcp_as02_jp2k_reader_t r, asdcp_writer_info_t* info) {
+    ASDCP::WriterInfo wi;
+    ASDCP::Result_t result = static_cast<AS_02::JP2K::MXFReader*>(r)->FillWriterInfo(wi);
+    if (ASDCP_SUCCESS(result)) {
+        cpp_to_c_writer_info(wi, info);
+    }
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_read_frame(asdcp_as02_jp2k_reader_t r, uint32_t frame_number,
+    uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx) {
+    ASDCP::JP2K::FrameBuffer fb;
+    fb.SetData(buf, buf_capacity);
+    fb.Capacity(buf_capacity);
+    ASDCP::Result_t result = static_cast<AS_02::JP2K::MXFReader*>(r)->ReadFrame(
+        frame_number, fb,
+        static_cast<ASDCP::AESDecContext*>(dec_ctx),
+        static_cast<ASDCP::HMACContext*>(hmac_ctx)
+    );
+    *out_size = fb.Size();
+    return result.Value();
+}
+
+/* ---- AS-02 PCM Writer ---- */
+asdcp_as02_pcm_writer_t asdcp_as02_pcm_writer_new(void) {
+    return new AS_02::PCM::MXFWriter();
+}
+
+void asdcp_as02_pcm_writer_free(asdcp_as02_pcm_writer_t w) {
+    delete static_cast<AS_02::PCM::MXFWriter*>(w);
+}
+
+asdcp_result_t asdcp_as02_pcm_writer_open_write(asdcp_as02_pcm_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc, uint32_t header_size) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    wi.LabelSetType = ASDCP::LS_MXF_SMPTE;
+
+    ASDCP::PCM::AudioDescriptor ad;
+    c_to_cpp_audio_desc(desc, ad);
+
+    // Writer takes ownership of the WaveAudioDescriptor.
+    ASDCP::MXF::WaveAudioDescriptor* ed = new ASDCP::MXF::WaveAudioDescriptor(dict);
+    ASDCP::Result_t result = ASDCP::PCM_ADesc_to_MD(ad, ed);
+    if (ASDCP_FAILURE(result)) {
+        delete ed;
+        return result.Value();
+    }
+
+    ASDCP::MXF::InterchangeObject_list_t subs; // no MCA labels
+    ASDCP::MXF::FileDescriptor* fd = static_cast<ASDCP::MXF::FileDescriptor*>(ed);
+    return static_cast<AS_02::PCM::MXFWriter*>(w)->OpenWrite(
+        std::string(filename), wi, fd, subs, ad.EditRate, header_size).Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_writer_write_frame(asdcp_as02_pcm_writer_t w,
+    const uint8_t* frame_data, uint32_t frame_size,
+    asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx) {
+    ASDCP::PCM::FrameBuffer fb;
+    fb.SetData(const_cast<uint8_t*>(frame_data), frame_size);
+    fb.Size(frame_size);
+    return static_cast<AS_02::PCM::MXFWriter*>(w)->WriteFrame(
+        fb,
+        static_cast<ASDCP::AESEncContext*>(enc_ctx),
+        static_cast<ASDCP::HMACContext*>(hmac_ctx)
+    ).Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_writer_finalize(asdcp_as02_pcm_writer_t w) {
+    return static_cast<AS_02::PCM::MXFWriter*>(w)->Finalize().Value();
+}
+
+/* ---- AS-02 PCM Reader ---- */
+asdcp_as02_pcm_reader_t asdcp_as02_pcm_reader_new(void) {
+    Kumu::FileReaderFactory defaultFactory;
+    return new AS_02::PCM::MXFReader(defaultFactory);
+}
+
+void asdcp_as02_pcm_reader_free(asdcp_as02_pcm_reader_t r) {
+    delete static_cast<AS_02::PCM::MXFReader*>(r);
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_open_read(asdcp_as02_pcm_reader_t r, const char* filename,
+    int32_t edit_rate_num, int32_t edit_rate_den) {
+    return static_cast<AS_02::PCM::MXFReader*>(r)->OpenRead(
+        std::string(filename), ASDCP::Rational(edit_rate_num, edit_rate_den)).Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_close(asdcp_as02_pcm_reader_t r) {
+    return static_cast<AS_02::PCM::MXFReader*>(r)->Close().Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_fill_audio_descriptor(asdcp_as02_pcm_reader_t r, asdcp_audio_descriptor_t* desc) {
+    AS_02::PCM::MXFReader* reader = static_cast<AS_02::PCM::MXFReader*>(r);
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(
+        ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_WaveAudioDescriptor), &obj);
+    ASDCP::MXF::WaveAudioDescriptor* wd = dynamic_cast<ASDCP::MXF::WaveAudioDescriptor*>(obj);
+    if (wd == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    ASDCP::PCM::AudioDescriptor ad;
+    ASDCP::Result_t result = ASDCP::MD_to_PCM_ADesc(wd, ad);
+    if (ASDCP_SUCCESS(result)) {
+        cpp_to_c_audio_desc(ad, desc);
+    }
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_fill_writer_info(asdcp_as02_pcm_reader_t r, asdcp_writer_info_t* info) {
+    ASDCP::WriterInfo wi;
+    ASDCP::Result_t result = static_cast<AS_02::PCM::MXFReader*>(r)->FillWriterInfo(wi);
+    if (ASDCP_SUCCESS(result)) {
+        cpp_to_c_writer_info(wi, info);
+    }
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_read_frame(asdcp_as02_pcm_reader_t r, uint32_t frame_number,
+    uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx) {
+    ASDCP::PCM::FrameBuffer fb;
+    fb.SetData(buf, buf_capacity);
+    fb.Capacity(buf_capacity);
+    ASDCP::Result_t result = static_cast<AS_02::PCM::MXFReader*>(r)->ReadFrame(
+        frame_number, fb,
+        static_cast<ASDCP::AESDecContext*>(dec_ctx),
+        static_cast<ASDCP::HMACContext*>(hmac_ctx)
+    );
+    *out_size = fb.Size();
+    return result.Value();
+}
+
+/* ---- AS-02 TimedText Writer ---- */
+asdcp_as02_timed_text_writer_t asdcp_as02_timed_text_writer_new(void) {
+    return new AS_02::TimedText::MXFWriter();
+}
+
+void asdcp_as02_timed_text_writer_free(asdcp_as02_timed_text_writer_t w) {
+    delete static_cast<AS_02::TimedText::MXFWriter*>(w);
+}
+
+asdcp_result_t asdcp_as02_timed_text_writer_open_write(asdcp_as02_timed_text_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_timed_text_descriptor_t* desc, uint32_t header_size) {
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    wi.LabelSetType = ASDCP::LS_MXF_SMPTE;
+    ASDCP::TimedText::TimedTextDescriptor td;
+    c_to_cpp_timed_text_desc(desc, td);
+    return static_cast<AS_02::TimedText::MXFWriter*>(w)->OpenWrite(std::string(filename), wi, td, header_size).Value();
+}
+
+asdcp_result_t asdcp_as02_timed_text_writer_write_timed_text_resource(asdcp_as02_timed_text_writer_t w,
+    const char* xml_doc, uint32_t xml_len,
+    asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx) {
+    (void)xml_len;
+    std::string doc(xml_doc);
+    return static_cast<AS_02::TimedText::MXFWriter*>(w)->WriteTimedTextResource(
+        doc,
+        static_cast<ASDCP::AESEncContext*>(enc_ctx),
+        static_cast<ASDCP::HMACContext*>(hmac_ctx)
+    ).Value();
+}
+
+asdcp_result_t asdcp_as02_timed_text_writer_write_ancillary_resource(asdcp_as02_timed_text_writer_t w,
+    const uint8_t* resource_data, uint32_t resource_size,
+    const uint8_t* resource_uuid, const char* mime_type,
+    asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx) {
+    ASDCP::TimedText::FrameBuffer fb;
+    fb.SetData(const_cast<uint8_t*>(resource_data), resource_size);
+    fb.Size(resource_size);
+    fb.AssetID(resource_uuid);
+    fb.MIMEType(std::string(mime_type));
+    return static_cast<AS_02::TimedText::MXFWriter*>(w)->WriteAncillaryResource(
+        fb,
+        static_cast<ASDCP::AESEncContext*>(enc_ctx),
+        static_cast<ASDCP::HMACContext*>(hmac_ctx)
+    ).Value();
+}
+
+asdcp_result_t asdcp_as02_timed_text_writer_finalize(asdcp_as02_timed_text_writer_t w) {
+    return static_cast<AS_02::TimedText::MXFWriter*>(w)->Finalize().Value();
+}
+
+/* ---- AS-02 TimedText Reader ---- */
+asdcp_as02_timed_text_reader_t asdcp_as02_timed_text_reader_new(void) {
+    Kumu::FileReaderFactory defaultFactory;
+    return new AS_02::TimedText::MXFReader(defaultFactory);
+}
+
+void asdcp_as02_timed_text_reader_free(asdcp_as02_timed_text_reader_t r) {
+    delete static_cast<AS_02::TimedText::MXFReader*>(r);
+}
+
+asdcp_result_t asdcp_as02_timed_text_reader_open_read(asdcp_as02_timed_text_reader_t r, const char* filename) {
+    return static_cast<AS_02::TimedText::MXFReader*>(r)->OpenRead(std::string(filename)).Value();
+}
+
+asdcp_result_t asdcp_as02_timed_text_reader_close(asdcp_as02_timed_text_reader_t r) {
+    return static_cast<AS_02::TimedText::MXFReader*>(r)->Close().Value();
+}
+
+asdcp_result_t asdcp_as02_timed_text_reader_fill_descriptor(asdcp_as02_timed_text_reader_t r, asdcp_timed_text_descriptor_t* desc) {
+    ASDCP::TimedText::TimedTextDescriptor td;
+    ASDCP::Result_t result = static_cast<AS_02::TimedText::MXFReader*>(r)->FillTimedTextDescriptor(td);
+    if (ASDCP_SUCCESS(result)) {
+        cpp_to_c_timed_text_desc(td, desc);
+    }
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_timed_text_reader_fill_writer_info(asdcp_as02_timed_text_reader_t r, asdcp_writer_info_t* info) {
+    ASDCP::WriterInfo wi;
+    ASDCP::Result_t result = static_cast<AS_02::TimedText::MXFReader*>(r)->FillWriterInfo(wi);
+    if (ASDCP_SUCCESS(result)) {
+        cpp_to_c_writer_info(wi, info);
+    }
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_timed_text_reader_read_timed_text_resource(asdcp_as02_timed_text_reader_t r,
+    uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx) {
+    std::string doc;
+    ASDCP::Result_t result = static_cast<AS_02::TimedText::MXFReader*>(r)->ReadTimedTextResource(
+        doc,
+        static_cast<ASDCP::AESDecContext*>(dec_ctx),
+        static_cast<ASDCP::HMACContext*>(hmac_ctx)
+    );
+    if (ASDCP_SUCCESS(result)) {
+        uint32_t doc_len = static_cast<uint32_t>(doc.size());
+        *out_size = doc_len;
+        if (doc_len > buf_capacity) {
+            return ASDCP::RESULT_SMALLBUF.Value();
+        }
+        memcpy(buf, doc.data(), doc_len);
+    } else {
+        *out_size = 0;
+    }
     return result.Value();
 }
 

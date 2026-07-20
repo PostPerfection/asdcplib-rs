@@ -3,7 +3,7 @@ name = "asdcplib"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Safe Rust wrapper for asdcplib (AS-DCP MXF read/write, AS-02 detection)"
+description = "Safe Rust wrapper for asdcplib (AS-DCP and AS-02/IMF MXF read/write)"
 
 [dependencies]
 asdcplib-sys = { path = "../asdcplib-sys" }

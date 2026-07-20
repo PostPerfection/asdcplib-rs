@@ -76,6 +76,12 @@ typedef void* asdcp_atmos_writer_t;
 typedef void* asdcp_atmos_reader_t;
 typedef void* asdcp_jp2k_s_writer_t;
 typedef void* asdcp_jp2k_s_reader_t;
+typedef void* asdcp_as02_jp2k_writer_t;
+typedef void* asdcp_as02_jp2k_reader_t;
+typedef void* asdcp_as02_pcm_writer_t;
+typedef void* asdcp_as02_pcm_reader_t;
+typedef void* asdcp_as02_timed_text_writer_t;
+typedef void* asdcp_as02_timed_text_reader_t;
 typedef void* asdcp_aes_enc_context_t;
 typedef void* asdcp_aes_dec_context_t;
 typedef void* asdcp_hmac_context_t;
@@ -211,6 +217,76 @@ asdcp_result_t asdcp_jp2k_s_reader_fill_picture_descriptor(asdcp_jp2k_s_reader_t
 asdcp_result_t asdcp_jp2k_s_reader_fill_writer_info(asdcp_jp2k_s_reader_t r, asdcp_writer_info_t* info);
 asdcp_result_t asdcp_jp2k_s_reader_read_frame(asdcp_jp2k_s_reader_t r, uint32_t frame_number,
     int32_t phase, uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
+
+/* ---- AS-02 (IMF / ST 2067-5) ---- */
+
+/* AS-02 JP2K Writer (frame-wrapped) */
+asdcp_as02_jp2k_writer_t asdcp_as02_jp2k_writer_new(void);
+void asdcp_as02_jp2k_writer_free(asdcp_as02_jp2k_writer_t w);
+asdcp_result_t asdcp_as02_jp2k_writer_open_write(asdcp_as02_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc, uint32_t header_size);
+asdcp_result_t asdcp_as02_jp2k_writer_write_frame(asdcp_as02_jp2k_writer_t w,
+    const uint8_t* frame_data, uint32_t frame_size,
+    asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
+asdcp_result_t asdcp_as02_jp2k_writer_finalize(asdcp_as02_jp2k_writer_t w);
+
+/* AS-02 JP2K Reader */
+asdcp_as02_jp2k_reader_t asdcp_as02_jp2k_reader_new(void);
+void asdcp_as02_jp2k_reader_free(asdcp_as02_jp2k_reader_t r);
+asdcp_result_t asdcp_as02_jp2k_reader_open_read(asdcp_as02_jp2k_reader_t r, const char* filename);
+asdcp_result_t asdcp_as02_jp2k_reader_close(asdcp_as02_jp2k_reader_t r);
+asdcp_result_t asdcp_as02_jp2k_reader_fill_picture_descriptor(asdcp_as02_jp2k_reader_t r, asdcp_picture_descriptor_t* desc);
+asdcp_result_t asdcp_as02_jp2k_reader_fill_writer_info(asdcp_as02_jp2k_reader_t r, asdcp_writer_info_t* info);
+asdcp_result_t asdcp_as02_jp2k_reader_read_frame(asdcp_as02_jp2k_reader_t r, uint32_t frame_number,
+    uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
+
+/* AS-02 PCM Writer (clip-wrapped). edit_rate is taken from desc->edit_rate. */
+asdcp_as02_pcm_writer_t asdcp_as02_pcm_writer_new(void);
+void asdcp_as02_pcm_writer_free(asdcp_as02_pcm_writer_t w);
+asdcp_result_t asdcp_as02_pcm_writer_open_write(asdcp_as02_pcm_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc, uint32_t header_size);
+asdcp_result_t asdcp_as02_pcm_writer_write_frame(asdcp_as02_pcm_writer_t w,
+    const uint8_t* frame_data, uint32_t frame_size,
+    asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
+asdcp_result_t asdcp_as02_pcm_writer_finalize(asdcp_as02_pcm_writer_t w);
+
+/* AS-02 PCM Reader. edit_rate must match the value used to write. */
+asdcp_as02_pcm_reader_t asdcp_as02_pcm_reader_new(void);
+void asdcp_as02_pcm_reader_free(asdcp_as02_pcm_reader_t r);
+asdcp_result_t asdcp_as02_pcm_reader_open_read(asdcp_as02_pcm_reader_t r, const char* filename,
+    int32_t edit_rate_num, int32_t edit_rate_den);
+asdcp_result_t asdcp_as02_pcm_reader_close(asdcp_as02_pcm_reader_t r);
+asdcp_result_t asdcp_as02_pcm_reader_fill_audio_descriptor(asdcp_as02_pcm_reader_t r, asdcp_audio_descriptor_t* desc);
+asdcp_result_t asdcp_as02_pcm_reader_fill_writer_info(asdcp_as02_pcm_reader_t r, asdcp_writer_info_t* info);
+asdcp_result_t asdcp_as02_pcm_reader_read_frame(asdcp_as02_pcm_reader_t r, uint32_t frame_number,
+    uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
+
+/* AS-02 TimedText Writer */
+asdcp_as02_timed_text_writer_t asdcp_as02_timed_text_writer_new(void);
+void asdcp_as02_timed_text_writer_free(asdcp_as02_timed_text_writer_t w);
+asdcp_result_t asdcp_as02_timed_text_writer_open_write(asdcp_as02_timed_text_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_timed_text_descriptor_t* desc, uint32_t header_size);
+asdcp_result_t asdcp_as02_timed_text_writer_write_timed_text_resource(asdcp_as02_timed_text_writer_t w,
+    const char* xml_doc, uint32_t xml_len,
+    asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
+asdcp_result_t asdcp_as02_timed_text_writer_write_ancillary_resource(asdcp_as02_timed_text_writer_t w,
+    const uint8_t* resource_data, uint32_t resource_size,
+    const uint8_t* resource_uuid, const char* mime_type,
+    asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
+asdcp_result_t asdcp_as02_timed_text_writer_finalize(asdcp_as02_timed_text_writer_t w);
+
+/* AS-02 TimedText Reader */
+asdcp_as02_timed_text_reader_t asdcp_as02_timed_text_reader_new(void);
+void asdcp_as02_timed_text_reader_free(asdcp_as02_timed_text_reader_t r);
+asdcp_result_t asdcp_as02_timed_text_reader_open_read(asdcp_as02_timed_text_reader_t r, const char* filename);
+asdcp_result_t asdcp_as02_timed_text_reader_close(asdcp_as02_timed_text_reader_t r);
+asdcp_result_t asdcp_as02_timed_text_reader_fill_descriptor(asdcp_as02_timed_text_reader_t r, asdcp_timed_text_descriptor_t* desc);
+asdcp_result_t asdcp_as02_timed_text_reader_fill_writer_info(asdcp_as02_timed_text_reader_t r, asdcp_writer_info_t* info);
+asdcp_result_t asdcp_as02_timed_text_reader_read_timed_text_resource(asdcp_as02_timed_text_reader_t r,
+    uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
     asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
 
 /* Utility */

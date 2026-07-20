@@ -30,6 +30,18 @@ pub enum AsdcpAtmosReader {}
 pub enum AsdcpJp2kSWriter {}
 /// Opaque handle to a JP2K stereoscopic MXF reader.
 pub enum AsdcpJp2kSReader {}
+/// Opaque handle to an AS-02 JP2K MXF writer.
+pub enum AsdcpAs02Jp2kWriter {}
+/// Opaque handle to an AS-02 JP2K MXF reader.
+pub enum AsdcpAs02Jp2kReader {}
+/// Opaque handle to an AS-02 PCM MXF writer.
+pub enum AsdcpAs02PcmWriter {}
+/// Opaque handle to an AS-02 PCM MXF reader.
+pub enum AsdcpAs02PcmReader {}
+/// Opaque handle to an AS-02 TimedText MXF writer.
+pub enum AsdcpAs02TimedTextWriter {}
+/// Opaque handle to an AS-02 TimedText MXF reader.
+pub enum AsdcpAs02TimedTextReader {}
 /// Opaque handle to an AES encryption context.
 pub enum AsdcpAesEncContext {}
 /// Opaque handle to an AES decryption context.
@@ -413,6 +425,151 @@ unsafe extern "C" {
         r: *mut AsdcpJp2kSReader,
         frame_number: u32,
         phase: c_int,
+        buf: *mut u8,
+        buf_capacity: u32,
+        out_size: *mut u32,
+        dec_ctx: *mut AsdcpAesDecContext,
+        hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+
+    // ---- AS-02 JP2K Writer ----
+    pub fn asdcp_as02_jp2k_writer_new() -> *mut AsdcpAs02Jp2kWriter;
+    pub fn asdcp_as02_jp2k_writer_free(w: *mut AsdcpAs02Jp2kWriter);
+    pub fn asdcp_as02_jp2k_writer_open_write(
+        w: *mut AsdcpAs02Jp2kWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpPictureDescriptor,
+        header_size: u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_writer_write_frame(
+        w: *mut AsdcpAs02Jp2kWriter,
+        frame_data: *const u8,
+        frame_size: u32,
+        enc_ctx: *mut AsdcpAesEncContext,
+        hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_writer_finalize(w: *mut AsdcpAs02Jp2kWriter) -> AsdcpResult;
+
+    // ---- AS-02 JP2K Reader ----
+    pub fn asdcp_as02_jp2k_reader_new() -> *mut AsdcpAs02Jp2kReader;
+    pub fn asdcp_as02_jp2k_reader_free(r: *mut AsdcpAs02Jp2kReader);
+    pub fn asdcp_as02_jp2k_reader_open_read(
+        r: *mut AsdcpAs02Jp2kReader,
+        filename: *const c_char,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_close(r: *mut AsdcpAs02Jp2kReader) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_fill_picture_descriptor(
+        r: *mut AsdcpAs02Jp2kReader,
+        desc: *mut AsdcpPictureDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_fill_writer_info(
+        r: *mut AsdcpAs02Jp2kReader,
+        info: *mut AsdcpWriterInfo,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_read_frame(
+        r: *mut AsdcpAs02Jp2kReader,
+        frame_number: u32,
+        buf: *mut u8,
+        buf_capacity: u32,
+        out_size: *mut u32,
+        dec_ctx: *mut AsdcpAesDecContext,
+        hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+
+    // ---- AS-02 PCM Writer ----
+    pub fn asdcp_as02_pcm_writer_new() -> *mut AsdcpAs02PcmWriter;
+    pub fn asdcp_as02_pcm_writer_free(w: *mut AsdcpAs02PcmWriter);
+    pub fn asdcp_as02_pcm_writer_open_write(
+        w: *mut AsdcpAs02PcmWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpAudioDescriptor,
+        header_size: u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_writer_write_frame(
+        w: *mut AsdcpAs02PcmWriter,
+        frame_data: *const u8,
+        frame_size: u32,
+        enc_ctx: *mut AsdcpAesEncContext,
+        hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_writer_finalize(w: *mut AsdcpAs02PcmWriter) -> AsdcpResult;
+
+    // ---- AS-02 PCM Reader ----
+    pub fn asdcp_as02_pcm_reader_new() -> *mut AsdcpAs02PcmReader;
+    pub fn asdcp_as02_pcm_reader_free(r: *mut AsdcpAs02PcmReader);
+    pub fn asdcp_as02_pcm_reader_open_read(
+        r: *mut AsdcpAs02PcmReader,
+        filename: *const c_char,
+        edit_rate_num: i32,
+        edit_rate_den: i32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_reader_close(r: *mut AsdcpAs02PcmReader) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_reader_fill_audio_descriptor(
+        r: *mut AsdcpAs02PcmReader,
+        desc: *mut AsdcpAudioDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_reader_fill_writer_info(
+        r: *mut AsdcpAs02PcmReader,
+        info: *mut AsdcpWriterInfo,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_reader_read_frame(
+        r: *mut AsdcpAs02PcmReader,
+        frame_number: u32,
+        buf: *mut u8,
+        buf_capacity: u32,
+        out_size: *mut u32,
+        dec_ctx: *mut AsdcpAesDecContext,
+        hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+
+    // ---- AS-02 TimedText Writer ----
+    pub fn asdcp_as02_timed_text_writer_new() -> *mut AsdcpAs02TimedTextWriter;
+    pub fn asdcp_as02_timed_text_writer_free(w: *mut AsdcpAs02TimedTextWriter);
+    pub fn asdcp_as02_timed_text_writer_open_write(
+        w: *mut AsdcpAs02TimedTextWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpTimedTextDescriptor,
+        header_size: u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_writer_write_timed_text_resource(
+        w: *mut AsdcpAs02TimedTextWriter,
+        xml_doc: *const c_char,
+        xml_len: u32,
+        enc_ctx: *mut AsdcpAesEncContext,
+        hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_writer_write_ancillary_resource(
+        w: *mut AsdcpAs02TimedTextWriter,
+        resource_data: *const u8,
+        resource_size: u32,
+        resource_uuid: *const u8,
+        mime_type: *const c_char,
+        enc_ctx: *mut AsdcpAesEncContext,
+        hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_writer_finalize(w: *mut AsdcpAs02TimedTextWriter) -> AsdcpResult;
+
+    // ---- AS-02 TimedText Reader ----
+    pub fn asdcp_as02_timed_text_reader_new() -> *mut AsdcpAs02TimedTextReader;
+    pub fn asdcp_as02_timed_text_reader_free(r: *mut AsdcpAs02TimedTextReader);
+    pub fn asdcp_as02_timed_text_reader_open_read(
+        r: *mut AsdcpAs02TimedTextReader,
+        filename: *const c_char,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_reader_close(r: *mut AsdcpAs02TimedTextReader) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_reader_fill_descriptor(
+        r: *mut AsdcpAs02TimedTextReader,
+        desc: *mut AsdcpTimedTextDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_reader_fill_writer_info(
+        r: *mut AsdcpAs02TimedTextReader,
+        info: *mut AsdcpWriterInfo,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_reader_read_timed_text_resource(
+        r: *mut AsdcpAs02TimedTextReader,
         buf: *mut u8,
         buf_capacity: u32,
         out_size: *mut u32,

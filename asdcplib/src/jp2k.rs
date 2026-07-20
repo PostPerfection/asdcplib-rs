@@ -18,7 +18,7 @@ pub struct PictureDescriptor {
 }
 
 impl PictureDescriptor {
-    fn to_ffi(&self) -> asdcplib_sys::AsdcpPictureDescriptor {
+    pub(crate) fn to_ffi(&self) -> asdcplib_sys::AsdcpPictureDescriptor {
         asdcplib_sys::AsdcpPictureDescriptor {
             edit_rate: self.edit_rate.to_ffi(),
             sample_rate: self.sample_rate.to_ffi(),
@@ -30,7 +30,7 @@ impl PictureDescriptor {
         }
     }
 
-    fn from_ffi(ffi: &asdcplib_sys::AsdcpPictureDescriptor) -> Self {
+    pub(crate) fn from_ffi(ffi: &asdcplib_sys::AsdcpPictureDescriptor) -> Self {
         Self {
             edit_rate: Rational::from_ffi(&ffi.edit_rate),
             sample_rate: Rational::from_ffi(&ffi.sample_rate),

@@ -33,7 +33,7 @@ pub struct AudioDescriptor {
 }
 
 impl AudioDescriptor {
-    fn to_ffi(&self) -> asdcplib_sys::AsdcpAudioDescriptor {
+    pub(crate) fn to_ffi(&self) -> asdcplib_sys::AsdcpAudioDescriptor {
         asdcplib_sys::AsdcpAudioDescriptor {
             edit_rate: self.edit_rate.to_ffi(),
             audio_sampling_rate: self.audio_sampling_rate.to_ffi(),
@@ -48,7 +48,7 @@ impl AudioDescriptor {
         }
     }
 
-    fn from_ffi(ffi: &asdcplib_sys::AsdcpAudioDescriptor) -> Self {
+    pub(crate) fn from_ffi(ffi: &asdcplib_sys::AsdcpAudioDescriptor) -> Self {
         Self {
             edit_rate: Rational::from_ffi(&ffi.edit_rate),
             audio_sampling_rate: Rational::from_ffi(&ffi.audio_sampling_rate),

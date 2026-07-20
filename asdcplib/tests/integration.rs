@@ -645,3 +645,250 @@ mod atmos_tests {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+#[cfg(test)]
+mod as02_jp2k_tests {
+    use asdcplib::WriterInfo;
+    use asdcplib::as02::jp2k::*;
+    use asdcplib::jp2k::PictureDescriptor;
+
+    fn descriptor(frames: u32) -> PictureDescriptor {
+        PictureDescriptor {
+            edit_rate: asdcplib::EDIT_RATE_24,
+            sample_rate: asdcplib::EDIT_RATE_24,
+            stored_width: 2048,
+            stored_height: 1080,
+            aspect_ratio: asdcplib::Rational::new(1998, 1080),
+            container_duration: frames,
+            component_count: 3,
+        }
+    }
+
+    #[test]
+    fn test_as02_jp2k_reader_open_nonexistent() {
+        let mut reader = MxfReader::new();
+        assert!(reader.open_read("/nonexistent/as02.mxf").is_err());
+    }
+
+    #[test]
+    fn test_as02_jp2k_roundtrip() {
+        let path = crate::util::temp_path("as02-jp2k-roundtrip");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo {
+            product_uuid: [7; 16],
+            asset_uuid: [8; 16],
+            ..Default::default()
+        };
+        // distinct payloads and lengths so a frame mix-up cannot pass
+        let frames: Vec<Vec<u8>> = (0..3)
+            .map(|i| crate::util::synthetic_j2c(i as u8 * 40 + 1, 4096 + i * 32))
+            .collect();
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(
+                    &path_string,
+                    &info,
+                    &descriptor(frames.len() as u32),
+                    16_384,
+                )
+                .unwrap();
+            for frame in &frames {
+                writer.write_frame(frame, None, None).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        assert_eq!(
+            asdcplib::essence_type(&path_string).unwrap(),
+            asdcplib::EssenceType::As02Jpeg2000
+        );
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+
+            let desc = reader.picture_descriptor().unwrap();
+            assert_eq!(desc.stored_width, 2048);
+            assert_eq!(desc.stored_height, 1080);
+            assert_eq!(desc.edit_rate, asdcplib::EDIT_RATE_24);
+            assert_eq!(desc.container_duration, frames.len() as u32);
+
+            let read_info = reader.writer_info().unwrap();
+            assert_eq!(read_info.asset_uuid, [8; 16]);
+
+            for (i, expected) in frames.iter().enumerate() {
+                let mut buf = vec![0u8; 8192];
+                let size = reader.read_frame(i as u32, &mut buf, None, None).unwrap();
+                assert_eq!(size, expected.len(), "frame {i} length");
+                assert_eq!(&buf[..size], expected.as_slice(), "frame {i} bytes");
+            }
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod as02_pcm_tests {
+    use asdcplib::as02::pcm::*;
+    use asdcplib::pcm::{AudioDescriptor, ChannelFormat};
+    use asdcplib::{Rational, WriterInfo};
+
+    #[test]
+    fn test_as02_pcm_reader_open_nonexistent() {
+        let mut reader = MxfReader::new();
+        assert!(
+            reader
+                .open_read("/nonexistent/as02.mxf", Rational::new(24, 1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_as02_pcm_roundtrip() {
+        let path = crate::util::temp_path("as02-pcm-roundtrip");
+        let path_string = path.to_string_lossy().to_string();
+        // block_align 18 = 24-bit * 6ch; 2000 samples/frame at 48k/24fps -> 36000 bytes
+        let descriptor = AudioDescriptor {
+            edit_rate: Rational::new(24, 1),
+            audio_sampling_rate: Rational::new(48_000, 1),
+            locked: true,
+            channel_count: 6,
+            quantization_bits: 24,
+            block_align: 18,
+            avg_bps: 864_000,
+            linked_track_id: 0,
+            container_duration: 0,
+            channel_format: ChannelFormat::Cfg1,
+        };
+        let info = WriterInfo {
+            asset_uuid: [2; 16],
+            ..Default::default()
+        };
+        // two distinct clip-wrapped frames so ordering is verified
+        let frames: Vec<Vec<u8>> = (0..2)
+            .map(|i| {
+                (0..36_000)
+                    .map(|b| (b as u8).wrapping_add(i * 91))
+                    .collect()
+            })
+            .collect();
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &info, &descriptor, 16_384)
+                .unwrap();
+            for frame in &frames {
+                writer.write_frame(frame, None, None).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        assert_eq!(
+            asdcplib::essence_type(&path_string).unwrap(),
+            asdcplib::EssenceType::As02Pcm24b48k
+        );
+
+        {
+            let mut reader = MxfReader::new();
+            reader
+                .open_read(&path_string, Rational::new(24, 1))
+                .unwrap();
+
+            let actual = reader.audio_descriptor().unwrap();
+            assert_eq!(actual.channel_count, 6);
+            assert_eq!(actual.quantization_bits, 24);
+            assert_eq!(actual.block_align, 18);
+            assert_eq!(actual.audio_sampling_rate, Rational::new(48_000, 1));
+
+            for (i, expected) in frames.iter().enumerate() {
+                let mut buf = vec![0u8; 36_000];
+                let size = reader.read_frame(i as u32, &mut buf, None, None).unwrap();
+                assert_eq!(size, expected.len(), "frame {i} length");
+                assert_eq!(&buf[..size], expected.as_slice(), "frame {i} bytes");
+            }
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod as02_timed_text_tests {
+    use asdcplib::as02::timed_text::*;
+    use asdcplib::timed_text::TimedTextDescriptor;
+    use asdcplib::{EDIT_RATE_24, WriterInfo};
+
+    // minimal ST 2067-2 (IMSC1 / TTML) subtitle document
+    const SUBTITLE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xml:lang="en">
+  <body>
+    <div>
+      <p begin="00:00:00.000" end="00:00:04.000">hello imf</p>
+    </div>
+  </body>
+</tt>"#;
+
+    #[test]
+    fn test_as02_timed_text_reader_open_nonexistent() {
+        let mut reader = MxfReader::new();
+        assert!(reader.open_read("/nonexistent/as02.mxf").is_err());
+    }
+
+    #[test]
+    fn test_as02_timed_text_roundtrip() {
+        let path = crate::util::temp_path("as02-timed-text-roundtrip");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo {
+            asset_uuid: [4; 16],
+            ..Default::default()
+        };
+        let desc = TimedTextDescriptor {
+            edit_rate: EDIT_RATE_24,
+            container_duration: 96,
+            asset_id: [5; 16],
+        };
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &info, &desc, 16_384)
+                .unwrap();
+            writer
+                .write_timed_text_resource(SUBTITLE_XML, None, None)
+                .unwrap();
+            writer.finalize().unwrap();
+        }
+
+        assert_eq!(
+            asdcplib::essence_type(&path_string).unwrap(),
+            asdcplib::EssenceType::As02TimedText
+        );
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+
+            let desc = reader.descriptor().unwrap();
+            assert_eq!(desc.edit_rate, EDIT_RATE_24);
+
+            let read_info = reader.writer_info().unwrap();
+            assert_eq!(read_info.asset_uuid, [4; 16]);
+
+            let mut buf = vec![0u8; 64 * 1024];
+            let size = reader
+                .read_timed_text_resource(&mut buf, None, None)
+                .unwrap();
+            assert_eq!(size, SUBTITLE_XML.len());
+            assert_eq!(&buf[..size], SUBTITLE_XML.as_bytes());
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+}

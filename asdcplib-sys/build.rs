@@ -56,6 +56,8 @@ fn main() {
     // On Windows MSVC, there is no auto-prefix, so we must use the full name "libasdcp_d".
     let prefix = if is_windows { "lib" } else { "" };
 
+    // Link order matters for static libs: as02 depends on asdcp depends on kumu.
+    println!("cargo:rustc-link-lib=static={prefix}as02{suffix}");
     println!("cargo:rustc-link-lib=static={prefix}asdcp{suffix}");
     println!("cargo:rustc-link-lib=static={prefix}kumu{suffix}");
 
