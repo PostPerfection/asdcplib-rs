@@ -133,6 +133,37 @@ impl MxfWriter {
         })
     }
 
+    /// Open a PCM MXF and attach SMPTE 377-4 MCA label subdescriptors.
+    ///
+    /// `mca_config` is an asdcp-wrap style config string, e.g.
+    /// `"51(L,R,C,LFE,Ls,Rs),HI,VIN"`. The label count must match the
+    /// descriptor's channel count or the call fails.
+    pub fn open_write_mca(
+        &mut self,
+        filename: &str,
+        info: &WriterInfo,
+        desc: &AudioDescriptor,
+        mca_config: &str,
+        header_size: u32,
+    ) -> Result<()> {
+        let cstr = CString::new(filename)
+            .map_err(|_| crate::Error::InvalidArgument("null byte in filename"))?;
+        let mca = CString::new(mca_config)
+            .map_err(|_| crate::Error::InvalidArgument("null byte in mca config"))?;
+        let ffi_info = info.to_ffi();
+        let ffi_desc = desc.to_ffi();
+        error::check(unsafe {
+            asdcplib_sys::asdcp_pcm_writer_open_write_mca(
+                self.ptr,
+                cstr.as_ptr(),
+                &ffi_info,
+                &ffi_desc,
+                mca.as_ptr(),
+                header_size,
+            )
+        })
+    }
+
     pub fn finalize(&mut self) -> Result<()> {
         error::check(unsafe { asdcplib_sys::asdcp_pcm_writer_finalize(self.ptr) })
     }
@@ -213,6 +244,37 @@ impl MxfReader {
         })?;
         Ok(out_size as usize)
     }
+
+    /// Summarise the SMPTE 377-4 MCA label subdescriptors in the header.
+    pub fn mca_labels(&mut self) -> Result<McaLabelSummary> {
+        let mut channel_labels: u32 = 0;
+        let mut soundfield_groups: u32 = 0;
+        let mut has_assignment: i32 = 0;
+        error::check(unsafe {
+            asdcplib_sys::asdcp_pcm_reader_read_mca_labels(
+                self.ptr,
+                &mut channel_labels,
+                &mut soundfield_groups,
+                &mut has_assignment,
+            )
+        })?;
+        Ok(McaLabelSummary {
+            channel_labels,
+            soundfield_groups,
+            has_mca_channel_assignment: has_assignment != 0,
+        })
+    }
+}
+
+/// MCA label subdescriptors found in a PCM MXF header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct McaLabelSummary {
+    /// Number of AudioChannelLabelSubDescriptors.
+    pub channel_labels: u32,
+    /// Number of SoundfieldGroupLabelSubDescriptors.
+    pub soundfield_groups: u32,
+    /// Whether the WaveAudioDescriptor carries the MCA ChannelAssignment UL.
+    pub has_mca_channel_assignment: bool,
 }
 
 impl Drop for MxfReader {

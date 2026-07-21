@@ -141,6 +141,12 @@ asdcp_result_t asdcp_pcm_writer_write_frame(asdcp_pcm_writer_t w,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
 asdcp_result_t asdcp_pcm_writer_finalize(asdcp_pcm_writer_t w);
 
+/* Open a PCM MXF and attach SMPTE 377-4 MCA label subdescriptors. mca_config is
+   an asdcp-wrap style config string, e.g. "51(L,R,C,LFE,Ls,Rs),HI,VIN". */
+asdcp_result_t asdcp_pcm_writer_open_write_mca(asdcp_pcm_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc,
+    const char* mca_config, uint32_t header_size);
+
 /* PCM Reader */
 asdcp_pcm_reader_t asdcp_pcm_reader_new(void);
 void asdcp_pcm_reader_free(asdcp_pcm_reader_t r);
@@ -151,6 +157,9 @@ asdcp_result_t asdcp_pcm_reader_fill_writer_info(asdcp_pcm_reader_t r, asdcp_wri
 asdcp_result_t asdcp_pcm_reader_read_frame(asdcp_pcm_reader_t r, uint32_t frame_number,
     uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
     asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
+asdcp_result_t asdcp_pcm_reader_read_mca_labels(asdcp_pcm_reader_t r,
+    uint32_t* channel_label_count, uint32_t* soundfield_group_count,
+    int32_t* has_mca_channel_assignment);
 
 /* TimedText Writer */
 asdcp_timed_text_writer_t asdcp_timed_text_writer_new(void);
@@ -158,7 +167,7 @@ void asdcp_timed_text_writer_free(asdcp_timed_text_writer_t w);
 asdcp_result_t asdcp_timed_text_writer_open_write(asdcp_timed_text_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_timed_text_descriptor_t* desc, uint32_t header_size);
 asdcp_result_t asdcp_timed_text_writer_write_timed_text_resource(asdcp_timed_text_writer_t w,
-    const char* xml_doc, uint32_t xml_len,
+    const char* xml_doc,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
 asdcp_result_t asdcp_timed_text_writer_write_ancillary_resource(asdcp_timed_text_writer_t w,
     const uint8_t* resource_data, uint32_t resource_size,
@@ -270,7 +279,7 @@ void asdcp_as02_timed_text_writer_free(asdcp_as02_timed_text_writer_t w);
 asdcp_result_t asdcp_as02_timed_text_writer_open_write(asdcp_as02_timed_text_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_timed_text_descriptor_t* desc, uint32_t header_size);
 asdcp_result_t asdcp_as02_timed_text_writer_write_timed_text_resource(asdcp_as02_timed_text_writer_t w,
-    const char* xml_doc, uint32_t xml_len,
+    const char* xml_doc,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
 asdcp_result_t asdcp_as02_timed_text_writer_write_ancillary_resource(asdcp_as02_timed_text_writer_t w,
     const uint8_t* resource_data, uint32_t resource_size,

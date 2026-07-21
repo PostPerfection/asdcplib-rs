@@ -402,7 +402,6 @@ pub mod timed_text {
                 asdcplib_sys::asdcp_as02_timed_text_writer_write_timed_text_resource(
                     self.ptr,
                     cstr.as_ptr(),
-                    xml.len() as u32,
                     enc_ptr,
                     hmac_ptr,
                 )

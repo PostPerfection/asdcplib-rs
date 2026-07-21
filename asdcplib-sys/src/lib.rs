@@ -260,6 +260,14 @@ unsafe extern "C" {
         hmac_ctx: *mut AsdcpHmacContext,
     ) -> AsdcpResult;
     pub fn asdcp_pcm_writer_finalize(w: *mut AsdcpPcmWriter) -> AsdcpResult;
+    pub fn asdcp_pcm_writer_open_write_mca(
+        w: *mut AsdcpPcmWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpAudioDescriptor,
+        mca_config: *const c_char,
+        header_size: u32,
+    ) -> AsdcpResult;
 
     // ---- PCM Reader ----
     pub fn asdcp_pcm_reader_new() -> *mut AsdcpPcmReader;
@@ -286,6 +294,12 @@ unsafe extern "C" {
         dec_ctx: *mut AsdcpAesDecContext,
         hmac_ctx: *mut AsdcpHmacContext,
     ) -> AsdcpResult;
+    pub fn asdcp_pcm_reader_read_mca_labels(
+        r: *mut AsdcpPcmReader,
+        channel_label_count: *mut u32,
+        soundfield_group_count: *mut u32,
+        has_mca_channel_assignment: *mut i32,
+    ) -> AsdcpResult;
 
     // ---- TimedText Writer ----
     pub fn asdcp_timed_text_writer_new() -> *mut AsdcpTimedTextWriter;
@@ -300,7 +314,6 @@ unsafe extern "C" {
     pub fn asdcp_timed_text_writer_write_timed_text_resource(
         w: *mut AsdcpTimedTextWriter,
         xml_doc: *const c_char,
-        xml_len: u32,
         enc_ctx: *mut AsdcpAesEncContext,
         hmac_ctx: *mut AsdcpHmacContext,
     ) -> AsdcpResult;
@@ -537,7 +550,6 @@ unsafe extern "C" {
     pub fn asdcp_as02_timed_text_writer_write_timed_text_resource(
         w: *mut AsdcpAs02TimedTextWriter,
         xml_doc: *const c_char,
-        xml_len: u32,
         enc_ctx: *mut AsdcpAesEncContext,
         hmac_ctx: *mut AsdcpHmacContext,
     ) -> AsdcpResult;

@@ -3,6 +3,7 @@
 #include <AS_DCP.h>
 #include <AS_02.h>
 #include <Metadata.h>
+#include <MXF.h>
 #include <MDD.h>
 #include <KM_fileio.h>
 #include <cstring>
@@ -327,6 +328,50 @@ asdcp_result_t asdcp_pcm_writer_finalize(asdcp_pcm_writer_t w) {
     return static_cast<ASDCP::PCM::MXFWriter*>(w)->Finalize().Value();
 }
 
+/* Open a PCM MXF and attach SMPTE 377-4 MCA label subdescriptors parsed from an
+   asdcp-wrap style config string (e.g. "51(L,R,C,LFE,Ls,Rs),HI,VIN"). Mirrors
+   asdcp-wrap.cpp: parse, OpenWrite, then add each subdescriptor to the header
+   and link it from the WaveAudioDescriptor with the MCA ChannelAssignment. */
+asdcp_result_t asdcp_pcm_writer_open_write_mca(asdcp_pcm_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc,
+    const char* mca_config, uint32_t header_size) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+    ASDCP::PCM::MXFWriter* writer = static_cast<ASDCP::PCM::MXFWriter*>(w);
+
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    ASDCP::PCM::AudioDescriptor ad;
+    c_to_cpp_audio_desc(desc, ad);
+
+    ASDCP::MXF::ASDCP_MCAConfigParser mca(dict);
+    if (!mca.DecodeString(std::string(mca_config))) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    ASDCP::Result_t result = writer->OpenWrite(std::string(filename), wi, ad, header_size);
+    if (ASDCP_FAILURE(result)) {
+        return result.Value();
+    }
+
+    ASDCP::MXF::WaveAudioDescriptor* ed = 0;
+    writer->OP1aHeader().GetMDObjectByType(dict->ul(ASDCP::MDD_WaveAudioDescriptor),
+        reinterpret_cast<ASDCP::MXF::InterchangeObject**>(&ed));
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    if (mca.ChannelCount() != ed->ChannelCount) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    ed->ChannelAssignment = ASDCP::UL(dict->ul(ASDCP::MDD_DCAudioChannelCfg_MCA));
+    for (ASDCP::MXF::InterchangeObject_list_t::iterator i = mca.begin(); i != mca.end(); ++i) {
+        writer->OP1aHeader().AddChildObject(*i);
+        ed->SubDescriptors.push_back((*i)->InstanceUID);
+        *i = 0; // header now owns it; stop the parser from freeing it too
+    }
+    return result.Value();
+}
+
 /* ---- PCM Reader ---- */
 asdcp_pcm_reader_t asdcp_pcm_reader_new(void) {
     Kumu::FileReaderFactory defaultFactory;
@@ -378,6 +423,38 @@ asdcp_result_t asdcp_pcm_reader_read_frame(asdcp_pcm_reader_t r, uint32_t frame_
     return result.Value();
 }
 
+/* Count MCA label subdescriptors in a PCM MXF header and report whether the
+   WaveAudioDescriptor carries the MCA ChannelAssignment UL. Proves labels
+   written by asdcp_pcm_writer_open_write_mca survived a write/read cycle. */
+asdcp_result_t asdcp_pcm_reader_read_mca_labels(asdcp_pcm_reader_t r,
+    uint32_t* channel_label_count, uint32_t* soundfield_group_count,
+    int32_t* has_mca_channel_assignment) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+    ASDCP::PCM::MXFReader* reader = static_cast<ASDCP::PCM::MXFReader*>(r);
+
+    std::list<ASDCP::MXF::InterchangeObject*> channels;
+    reader->OP1aHeader().GetMDObjectsByType(
+        dict->ul(ASDCP::MDD_AudioChannelLabelSubDescriptor), channels);
+    *channel_label_count = static_cast<uint32_t>(channels.size());
+
+    std::list<ASDCP::MXF::InterchangeObject*> groups;
+    reader->OP1aHeader().GetMDObjectsByType(
+        dict->ul(ASDCP::MDD_SoundfieldGroupLabelSubDescriptor), groups);
+    *soundfield_group_count = static_cast<uint32_t>(groups.size());
+
+    *has_mca_channel_assignment = 0;
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(dict->ul(ASDCP::MDD_WaveAudioDescriptor), &obj);
+    ASDCP::MXF::WaveAudioDescriptor* wd = dynamic_cast<ASDCP::MXF::WaveAudioDescriptor*>(obj);
+    if (wd != 0 && !wd->ChannelAssignment.empty()) {
+        ASDCP::UL mca_ul(dict->ul(ASDCP::MDD_DCAudioChannelCfg_MCA));
+        if (wd->ChannelAssignment == mca_ul) {
+            *has_mca_channel_assignment = 1;
+        }
+    }
+    return ASDCP::RESULT_OK.Value();
+}
+
 /* ---- TimedText Writer ---- */
 asdcp_timed_text_writer_t asdcp_timed_text_writer_new(void) {
     return new ASDCP::TimedText::MXFWriter();
@@ -397,9 +474,8 @@ asdcp_result_t asdcp_timed_text_writer_open_write(asdcp_timed_text_writer_t w, c
 }
 
 asdcp_result_t asdcp_timed_text_writer_write_timed_text_resource(asdcp_timed_text_writer_t w,
-    const char* xml_doc, uint32_t xml_len,
+    const char* xml_doc,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx) {
-    (void)xml_len;
     std::string doc(xml_doc);
     return static_cast<ASDCP::TimedText::MXFWriter*>(w)->WriteTimedTextResource(
         doc,
@@ -945,9 +1021,8 @@ asdcp_result_t asdcp_as02_timed_text_writer_open_write(asdcp_as02_timed_text_wri
 }
 
 asdcp_result_t asdcp_as02_timed_text_writer_write_timed_text_resource(asdcp_as02_timed_text_writer_t w,
-    const char* xml_doc, uint32_t xml_len,
+    const char* xml_doc,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx) {
-    (void)xml_len;
     std::string doc(xml_doc);
     return static_cast<AS_02::TimedText::MXFWriter*>(w)->WriteTimedTextResource(
         doc,

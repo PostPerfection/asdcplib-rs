@@ -555,6 +555,103 @@ mod pcm_tests {
 
         std::fs::remove_file(path).unwrap();
     }
+
+    /// Wrap a 5.1 PCM MXF with SMPTE 377-4 MCA labels and read them back: six
+    /// channel labels, one soundfield group, and the MCA ChannelAssignment UL.
+    #[test]
+    fn test_pcm_mca_labels_roundtrip() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "asdcplib-pcm-mca-{}-{unique}.mxf",
+            std::process::id()
+        ));
+        let path_string = path.to_string_lossy().to_string();
+        let descriptor = AudioDescriptor {
+            edit_rate: Rational::new(24, 1),
+            audio_sampling_rate: Rational::new(48_000, 1),
+            locked: true,
+            channel_count: 6,
+            quantization_bits: 24,
+            block_align: 18,
+            avg_bps: 864_000,
+            linked_track_id: 0,
+            container_duration: 1,
+            channel_format: ChannelFormat::Cfg6, // MCA
+        };
+        let info = WriterInfo {
+            asset_uuid: [3; 16],
+            ..Default::default()
+        };
+        let frame = vec![0x5a; 36_000];
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_mca(
+                    &path_string,
+                    &info,
+                    &descriptor,
+                    "51(L,R,C,LFE,Ls,Rs)",
+                    16_384,
+                )
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            let mca = reader.mca_labels().unwrap();
+            assert_eq!(mca.channel_labels, 6, "one label per 5.1 channel");
+            assert_eq!(mca.soundfield_groups, 1, "one 5.1 soundfield group");
+            assert!(
+                mca.has_mca_channel_assignment,
+                "WaveAudioDescriptor must carry the MCA ChannelAssignment UL"
+            );
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// A label count that disagrees with the channel count must fail the wrap.
+    #[test]
+    fn test_pcm_mca_channel_count_mismatch_fails() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "asdcplib-pcm-mca-bad-{}-{unique}.mxf",
+            std::process::id()
+        ));
+        let path_string = path.to_string_lossy().to_string();
+        let descriptor = AudioDescriptor {
+            edit_rate: Rational::new(24, 1),
+            audio_sampling_rate: Rational::new(48_000, 1),
+            locked: true,
+            channel_count: 2,
+            quantization_bits: 24,
+            block_align: 6,
+            avg_bps: 288_000,
+            linked_track_id: 0,
+            container_duration: 1,
+            channel_format: ChannelFormat::Cfg6,
+        };
+        let info = WriterInfo::default();
+        let mut writer = MxfWriter::new();
+        // six MCA labels against a two-channel descriptor
+        assert!(
+            writer
+                .open_write_mca(&path_string, &info, &descriptor, "51(L,R,C,LFE,Ls,Rs)", 16_384)
+                .is_err()
+        );
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[cfg(test)]
