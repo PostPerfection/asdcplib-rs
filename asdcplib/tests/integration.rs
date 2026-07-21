@@ -647,7 +647,13 @@ mod pcm_tests {
         // six MCA labels against a two-channel descriptor
         assert!(
             writer
-                .open_write_mca(&path_string, &info, &descriptor, "51(L,R,C,LFE,Ls,Rs)", 16_384)
+                .open_write_mca(
+                    &path_string,
+                    &info,
+                    &descriptor,
+                    "51(L,R,C,LFE,Ls,Rs)",
+                    16_384
+                )
                 .is_err()
         );
         let _ = std::fs::remove_file(path);
