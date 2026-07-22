@@ -47,7 +47,7 @@ let size = reader.read_frame(0, &mut buf, None, None)?;
 AS-DCP (d-cinema, ST 429) read/write:
 
 - JPEG 2000 (mono + stereoscopic 3D)
-- PCM audio (24-bit, 48kHz / 96kHz)
+- PCM audio (24-bit, 48kHz / 96kHz), with SMPTE ST 377-4 MCA multi-channel audio label read/write
 - Timed Text (SMPTE ST 429-5)
 - Dolby Atmos (IAB)
 
