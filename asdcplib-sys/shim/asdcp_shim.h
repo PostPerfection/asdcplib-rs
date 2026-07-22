@@ -174,6 +174,15 @@ asdcp_result_t asdcp_timed_text_writer_write_ancillary_resource(asdcp_timed_text
     const uint8_t* resource_uuid, const char* mime_type,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
 asdcp_result_t asdcp_timed_text_writer_finalize(asdcp_timed_text_writer_t w);
+/* Open a TimedText MXF for writing, declaring the ancillary resources (fonts,
+   images) that will follow so the reader can enumerate them. resource_uuids is
+   resource_count*16 bytes; resource_types is resource_count int32 values
+   (0 = binary, 1 = PNG, 2 = OpenType font). WriteAncillaryResource calls must
+   follow in the same order. */
+asdcp_result_t asdcp_timed_text_writer_open_write_with_resources(asdcp_timed_text_writer_t w,
+    const char* filename, const asdcp_writer_info_t* info, const asdcp_timed_text_descriptor_t* desc,
+    const uint8_t* resource_uuids, const int32_t* resource_types, uint32_t resource_count,
+    uint32_t header_size);
 
 /* TimedText Reader */
 asdcp_timed_text_reader_t asdcp_timed_text_reader_new(void);
@@ -184,6 +193,18 @@ asdcp_result_t asdcp_timed_text_reader_fill_descriptor(asdcp_timed_text_reader_t
 asdcp_result_t asdcp_timed_text_reader_fill_writer_info(asdcp_timed_text_reader_t r, asdcp_writer_info_t* info);
 asdcp_result_t asdcp_timed_text_reader_read_timed_text_resource(asdcp_timed_text_reader_t r,
     uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
+/* Number of ancillary resources (fonts, images) declared in the MXF header. */
+asdcp_result_t asdcp_timed_text_reader_ancillary_resource_count(asdcp_timed_text_reader_t r,
+    uint32_t* out_count);
+/* UUID and MIME type (0 = binary, 1 = PNG, 2 = OpenType font) of the index-th
+   ancillary resource. */
+asdcp_result_t asdcp_timed_text_reader_ancillary_resource_info(asdcp_timed_text_reader_t r,
+    uint32_t index, uint8_t* out_uuid, int32_t* out_type);
+/* Read the ancillary resource identified by resource_uuid into buf. On a short
+   buffer, out_size still reports the bytes read into the header's stream. */
+asdcp_result_t asdcp_timed_text_reader_read_ancillary_resource(asdcp_timed_text_reader_t r,
+    const uint8_t* resource_uuid, uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
     asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
 
 /* Atmos Writer */

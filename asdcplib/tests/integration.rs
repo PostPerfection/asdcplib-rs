@@ -742,6 +742,73 @@ mod timed_text_tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    /// Write a subtitle MXF with an embedded font as an ancillary resource, then
+    /// read it back: the reader must enumerate one resource with the matching
+    /// UUID and OpenType MIME, and return byte-identical font data.
+    #[test]
+    fn test_ancillary_resource_roundtrip() {
+        let path = crate::util::temp_path("timed-text-ancillary");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo {
+            asset_uuid: [4; 16],
+            ..Default::default()
+        };
+        let desc = TimedTextDescriptor {
+            edit_rate: EDIT_RATE_24,
+            container_duration: 96,
+            asset_id: [5; 16],
+        };
+        // stand-in font payload; the bytes only need to survive the round trip
+        let font: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+        let font_uuid = [0xAB; 16];
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_with_resources(
+                    &path_string,
+                    &info,
+                    &desc,
+                    &[AncillaryResourceInfo {
+                        uuid: font_uuid,
+                        mime_type: MimeType::OpenType,
+                    }],
+                    32_768,
+                )
+                .unwrap();
+            writer
+                .write_timed_text_resource(SUBTITLE_XML, None, None)
+                .unwrap();
+            writer
+                .write_ancillary_resource(
+                    &font,
+                    &font_uuid,
+                    "application/x-font-opentype",
+                    None,
+                    None,
+                )
+                .unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        assert_eq!(reader.ancillary_resource_count().unwrap(), 1);
+        let info0 = reader.ancillary_resource_info(0).unwrap();
+        assert_eq!(info0.uuid, font_uuid);
+        assert_eq!(info0.mime_type, MimeType::OpenType);
+
+        let mut buf = vec![0u8; 64 * 1024];
+        let n = reader
+            .read_ancillary_resource(&font_uuid, &mut buf, None, None)
+            .unwrap();
+        assert_eq!(n, font.len(), "font byte count must survive the round trip");
+        assert_eq!(&buf[..n], font.as_slice(), "font bytes must be identical");
+        reader.close().unwrap();
+
+        std::fs::remove_file(path).unwrap();
+    }
+
     /// A short buffer used to be silently truncated and reported as success.
     #[test]
     fn test_timed_text_buffer_too_small() {
