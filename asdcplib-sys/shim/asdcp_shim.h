@@ -66,6 +66,25 @@ typedef struct {
     uint8_t atmos_version;
 } asdcp_atmos_descriptor_t;
 
+/* HDR/WCG picture metadata (ST 2067-21). Each field is written or read only when
+   its has_* flag is set. Chromaticity coordinates are the raw ST 2086 ui16 values
+   (0.00002 increments); luminance is the raw ui32 (0.0001 cd/m^2 increments).
+   mastering_display_primaries is First.x,First.y,Second.x,Second.y,Third.x,Third.y. */
+typedef struct {
+    int32_t has_transfer_characteristic;
+    uint8_t transfer_characteristic[16];
+    int32_t has_color_primaries;
+    uint8_t color_primaries[16];
+    int32_t has_mastering_display_primaries;
+    uint16_t mastering_display_primaries[6];
+    int32_t has_mastering_display_white_point;
+    uint16_t mastering_display_white_point[2];
+    int32_t has_mastering_display_max_luminance;
+    uint32_t mastering_display_max_luminance;
+    int32_t has_mastering_display_min_luminance;
+    uint32_t mastering_display_min_luminance;
+} asdcp_hdr_metadata_t;
+
 typedef void* asdcp_jp2k_writer_t;
 typedef void* asdcp_jp2k_reader_t;
 typedef void* asdcp_pcm_writer_t;
@@ -119,6 +138,17 @@ asdcp_result_t asdcp_jp2k_writer_write_frame(asdcp_jp2k_writer_t w,
     const uint8_t* frame_data, uint32_t frame_size,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
 asdcp_result_t asdcp_jp2k_writer_finalize(asdcp_jp2k_writer_t w);
+/* Open a JP2K MXF and set the picture essence descriptor's TransferCharacteristic
+   UL (e.g. the SMPTE ST 2084 PQ UL for HDR). transfer_characteristic_ul is 16
+   bytes, or null to leave it unset. */
+asdcp_result_t asdcp_jp2k_writer_open_write_transfer(asdcp_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const uint8_t* transfer_characteristic_ul, uint32_t header_size);
+/* Open a JP2K MXF and set HDR/WCG picture metadata (transfer characteristic, color
+   primaries, ST 2086 mastering display). */
+asdcp_result_t asdcp_jp2k_writer_open_write_hdr(asdcp_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const asdcp_hdr_metadata_t* hdr, uint32_t header_size);
 
 /* JP2K Reader */
 asdcp_jp2k_reader_t asdcp_jp2k_reader_new(void);
@@ -130,6 +160,13 @@ asdcp_result_t asdcp_jp2k_reader_fill_writer_info(asdcp_jp2k_reader_t r, asdcp_w
 asdcp_result_t asdcp_jp2k_reader_read_frame(asdcp_jp2k_reader_t r, uint32_t frame_number,
     uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
     asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
+/* Read the picture essence descriptor's TransferCharacteristic. When present,
+   out_ul receives the 16-byte UL and has_transfer_characteristic is set to 1,
+   otherwise it is 0. */
+asdcp_result_t asdcp_jp2k_reader_read_transfer_characteristic(asdcp_jp2k_reader_t r,
+    uint8_t* out_ul, int32_t* has_transfer_characteristic);
+/* Read all HDR/WCG picture metadata off the descriptor. */
+asdcp_result_t asdcp_jp2k_reader_read_hdr(asdcp_jp2k_reader_t r, asdcp_hdr_metadata_t* hdr);
 
 /* PCM Writer */
 asdcp_pcm_writer_t asdcp_pcm_writer_new(void);
@@ -256,6 +293,11 @@ asdcp_as02_jp2k_writer_t asdcp_as02_jp2k_writer_new(void);
 void asdcp_as02_jp2k_writer_free(asdcp_as02_jp2k_writer_t w);
 asdcp_result_t asdcp_as02_jp2k_writer_open_write(asdcp_as02_jp2k_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc, uint32_t header_size);
+/* Open an AS-02 JP2K MXF and set HDR/WCG picture metadata (transfer characteristic,
+   color primaries, ST 2086 mastering display) on the RGBA essence descriptor. */
+asdcp_result_t asdcp_as02_jp2k_writer_open_write_hdr(asdcp_as02_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const asdcp_hdr_metadata_t* hdr, uint32_t header_size);
 asdcp_result_t asdcp_as02_jp2k_writer_write_frame(asdcp_as02_jp2k_writer_t w,
     const uint8_t* frame_data, uint32_t frame_size,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
@@ -267,6 +309,8 @@ void asdcp_as02_jp2k_reader_free(asdcp_as02_jp2k_reader_t r);
 asdcp_result_t asdcp_as02_jp2k_reader_open_read(asdcp_as02_jp2k_reader_t r, const char* filename);
 asdcp_result_t asdcp_as02_jp2k_reader_close(asdcp_as02_jp2k_reader_t r);
 asdcp_result_t asdcp_as02_jp2k_reader_fill_picture_descriptor(asdcp_as02_jp2k_reader_t r, asdcp_picture_descriptor_t* desc);
+/* Read all HDR/WCG picture metadata off the AS-02 descriptor. */
+asdcp_result_t asdcp_as02_jp2k_reader_read_hdr(asdcp_as02_jp2k_reader_t r, asdcp_hdr_metadata_t* hdr);
 asdcp_result_t asdcp_as02_jp2k_reader_fill_writer_info(asdcp_as02_jp2k_reader_t r, asdcp_writer_info_t* info);
 asdcp_result_t asdcp_as02_jp2k_reader_read_frame(asdcp_as02_jp2k_reader_t r, uint32_t frame_number,
     uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,

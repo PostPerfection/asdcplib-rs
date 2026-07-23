@@ -293,6 +293,127 @@ mod jp2k_tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    /// Write a JP2K MXF with the ST 2084 (PQ) TransferCharacteristic UL set on
+    /// the picture descriptor, then read it back and confirm the UL survived.
+    #[test]
+    fn test_jp2k_transfer_characteristic_roundtrip() {
+        let path = crate::util::temp_path("jp2k-transfer-characteristic");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo::default();
+        let frames: Vec<Vec<u8>> = (0..2)
+            .map(|i| crate::util::synthetic_j2c(i as u8 * 40 + 1, 4096 + i * 32))
+            .collect();
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_transfer(
+                    &path_string,
+                    &info,
+                    &descriptor(frames.len() as u32),
+                    &TRANSFER_CHARACTERISTIC_ST2084,
+                    16_384,
+                )
+                .unwrap();
+            for frame in &frames {
+                writer.write_frame(frame, None, None).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            assert_eq!(
+                reader.transfer_characteristic().unwrap(),
+                Some(TRANSFER_CHARACTERISTIC_ST2084),
+                "ST 2084 transfer characteristic UL must round-trip"
+            );
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// A plain writer sets no TransferCharacteristic, so the reader reports None.
+    #[test]
+    fn test_jp2k_transfer_characteristic_absent() {
+        let path = crate::util::temp_path("jp2k-transfer-characteristic-absent");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo::default();
+        let frame = crate::util::synthetic_j2c(0x33, 4096);
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &info, &descriptor(1), 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            assert_eq!(reader.transfer_characteristic().unwrap(), None);
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// Full HDR block (ST 2084 transfer, P3D65 primaries, ST 2086 mastering
+    /// display) on the AS-DCP JP2K writer round-trips through the reader.
+    #[test]
+    fn test_jp2k_hdr_roundtrip() {
+        let path = crate::util::temp_path("jp2k-hdr-roundtrip");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo::default();
+        let frames: Vec<Vec<u8>> = (0..2)
+            .map(|i| crate::util::synthetic_j2c(i as u8 * 40 + 1, 4096 + i * 32))
+            .collect();
+
+        let hdr = HdrMetadata {
+            transfer_characteristic: Some(TRANSFER_CHARACTERISTIC_ST2084),
+            color_primaries: Some(COLOR_PRIMARIES_P3D65),
+            mastering_display_primaries: Some([[34000, 16000], [13250, 34500], [7500, 3000]]),
+            mastering_display_white_point: Some([15635, 16450]),
+            mastering_display_max_luminance: Some(48_0000),
+            mastering_display_min_luminance: Some(50),
+        };
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_hdr(
+                    &path_string,
+                    &info,
+                    &descriptor(frames.len() as u32),
+                    &hdr,
+                    16_384,
+                )
+                .unwrap();
+            for frame in &frames {
+                writer.write_frame(frame, None, None).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            assert_eq!(reader.hdr_metadata().unwrap(), hdr);
+            // the single-field accessor agrees with the full block
+            assert_eq!(
+                reader.transfer_characteristic().unwrap(),
+                Some(TRANSFER_CHARACTERISTIC_ST2084)
+            );
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
     /// Encrypt with AES + HMAC on write, decrypt on read, and prove the
     /// plaintext survives byte-exact. Also proves a wrong or missing key
     /// cannot recover it: the check value and the HMAC both reject a bad key.
@@ -949,7 +1070,9 @@ mod atmos_tests {
 mod as02_jp2k_tests {
     use asdcplib::WriterInfo;
     use asdcplib::as02::jp2k::*;
-    use asdcplib::jp2k::PictureDescriptor;
+    use asdcplib::jp2k::{
+        COLOR_PRIMARIES_BT2020, HdrMetadata, PictureDescriptor, TRANSFER_CHARACTERISTIC_ST2084,
+    };
 
     fn descriptor(frames: u32) -> PictureDescriptor {
         PictureDescriptor {
@@ -1023,6 +1146,83 @@ mod as02_jp2k_tests {
                 assert_eq!(size, expected.len(), "frame {i} length");
                 assert_eq!(&buf[..size], expected.as_slice(), "frame {i} bytes");
             }
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// Write an AS-02 JP2K MXF with ST 2084 transfer, BT.2020 primaries and a
+    /// full ST 2086 mastering display block, then read it all back and assert
+    /// every field round-trips. This is the ST 2067-21 HDR essence path.
+    #[test]
+    fn test_as02_jp2k_hdr_roundtrip() {
+        let path = crate::util::temp_path("as02-jp2k-hdr-roundtrip");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo::default();
+        let frames: Vec<Vec<u8>> = (0..2)
+            .map(|i| crate::util::synthetic_j2c(i as u8 * 40 + 1, 4096 + i * 32))
+            .collect();
+
+        // ST 2086 BT.2020 display primaries and D65 white point in 0.00002 units,
+        // 1000 cd/m^2 max and 0.0001 cd/m^2 min in 0.0001 units.
+        let hdr = HdrMetadata {
+            transfer_characteristic: Some(TRANSFER_CHARACTERISTIC_ST2084),
+            color_primaries: Some(COLOR_PRIMARIES_BT2020),
+            mastering_display_primaries: Some([[35400, 14600], [8500, 39850], [6550, 2300]]),
+            mastering_display_white_point: Some([15635, 16450]),
+            mastering_display_max_luminance: Some(10_000_000),
+            mastering_display_min_luminance: Some(1),
+        };
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_hdr(
+                    &path_string,
+                    &info,
+                    &descriptor(frames.len() as u32),
+                    &hdr,
+                    16_384,
+                )
+                .unwrap();
+            for frame in &frames {
+                writer.write_frame(frame, None, None).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            assert_eq!(reader.hdr_metadata().unwrap(), hdr);
+            reader.close().unwrap();
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// A plain AS-02 writer sets no HDR metadata, so every field reads back None.
+    #[test]
+    fn test_as02_jp2k_hdr_absent() {
+        let path = crate::util::temp_path("as02-jp2k-hdr-absent");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo::default();
+        let frame = crate::util::synthetic_j2c(0x55, 4096);
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &info, &descriptor(1), 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        {
+            let mut reader = MxfReader::new();
+            reader.open_read(&path_string).unwrap();
+            assert_eq!(reader.hdr_metadata().unwrap(), HdrMetadata::default());
             reader.close().unwrap();
         }
 

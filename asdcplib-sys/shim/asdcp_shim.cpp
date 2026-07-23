@@ -139,6 +139,73 @@ static void cpp_to_c_atmos_desc(const ASDCP::ATMOS::AtmosDescriptor& cpp, asdcp_
     c->atmos_version = cpp.AtmosVersion;
 }
 
+/* Apply HDR/WCG metadata to a picture essence descriptor. Only fields with a set
+   presence flag are written, so unset optional properties stay absent. */
+static void apply_hdr_metadata(ASDCP::MXF::GenericPictureEssenceDescriptor* ed,
+    const asdcp_hdr_metadata_t* hdr) {
+    if (hdr->has_transfer_characteristic) {
+        ed->TransferCharacteristic = ASDCP::UL(hdr->transfer_characteristic);
+    }
+    if (hdr->has_color_primaries) {
+        ed->ColorPrimaries = ASDCP::UL(hdr->color_primaries);
+    }
+    if (hdr->has_mastering_display_primaries) {
+        const uint16_t* p = hdr->mastering_display_primaries;
+        ed->MasteringDisplayPrimaries = ASDCP::MXF::ThreeColorPrimaries(
+            ASDCP::MXF::ColorPrimary(p[0], p[1]),
+            ASDCP::MXF::ColorPrimary(p[2], p[3]),
+            ASDCP::MXF::ColorPrimary(p[4], p[5]));
+    }
+    if (hdr->has_mastering_display_white_point) {
+        ed->MasteringDisplayWhitePointChromaticity = ASDCP::MXF::ColorPrimary(
+            hdr->mastering_display_white_point[0], hdr->mastering_display_white_point[1]);
+    }
+    if (hdr->has_mastering_display_max_luminance) {
+        ed->MasteringDisplayMaximumLuminance = hdr->mastering_display_max_luminance;
+    }
+    if (hdr->has_mastering_display_min_luminance) {
+        ed->MasteringDisplayMinimumLuminance = hdr->mastering_display_min_luminance;
+    }
+}
+
+/* Read HDR/WCG metadata off a picture essence descriptor into the C struct. */
+static void read_hdr_metadata(const ASDCP::MXF::GenericPictureEssenceDescriptor* ed,
+    asdcp_hdr_metadata_t* hdr) {
+    memset(hdr, 0, sizeof(*hdr));
+    if (!ed->TransferCharacteristic.empty()) {
+        memcpy(hdr->transfer_characteristic, ed->TransferCharacteristic.const_get().Value(), 16);
+        hdr->has_transfer_characteristic = 1;
+    }
+    if (!ed->ColorPrimaries.empty()) {
+        memcpy(hdr->color_primaries, ed->ColorPrimaries.const_get().Value(), 16);
+        hdr->has_color_primaries = 1;
+    }
+    if (!ed->MasteringDisplayPrimaries.empty()) {
+        const ASDCP::MXF::ThreeColorPrimaries& tcp = ed->MasteringDisplayPrimaries.const_get();
+        hdr->mastering_display_primaries[0] = tcp.First.X;
+        hdr->mastering_display_primaries[1] = tcp.First.Y;
+        hdr->mastering_display_primaries[2] = tcp.Second.X;
+        hdr->mastering_display_primaries[3] = tcp.Second.Y;
+        hdr->mastering_display_primaries[4] = tcp.Third.X;
+        hdr->mastering_display_primaries[5] = tcp.Third.Y;
+        hdr->has_mastering_display_primaries = 1;
+    }
+    if (!ed->MasteringDisplayWhitePointChromaticity.empty()) {
+        const ASDCP::MXF::ColorPrimary& wp = ed->MasteringDisplayWhitePointChromaticity.const_get();
+        hdr->mastering_display_white_point[0] = wp.X;
+        hdr->mastering_display_white_point[1] = wp.Y;
+        hdr->has_mastering_display_white_point = 1;
+    }
+    if (!ed->MasteringDisplayMaximumLuminance.empty()) {
+        hdr->mastering_display_max_luminance = ed->MasteringDisplayMaximumLuminance.const_get();
+        hdr->has_mastering_display_max_luminance = 1;
+    }
+    if (!ed->MasteringDisplayMinimumLuminance.empty()) {
+        hdr->mastering_display_min_luminance = ed->MasteringDisplayMinimumLuminance.const_get();
+        hdr->has_mastering_display_min_luminance = 1;
+    }
+}
+
 /* ---- Version ---- */
 const char* asdcp_version(void) {
     return ASDCP::Version();
@@ -242,6 +309,66 @@ asdcp_result_t asdcp_jp2k_writer_finalize(asdcp_jp2k_writer_t w) {
     return static_cast<ASDCP::JP2K::MXFWriter*>(w)->Finalize().Value();
 }
 
+/* Open a JP2K MXF, then set the TransferCharacteristic UL on the RGBAEssenceDescriptor
+   the writer created. h__ASDCPWriter rewrites the header at Finalize, so the change
+   made here after OpenWrite persists. */
+asdcp_result_t asdcp_jp2k_writer_open_write_transfer(asdcp_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const uint8_t* transfer_characteristic_ul, uint32_t header_size) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+    ASDCP::JP2K::MXFWriter* writer = static_cast<ASDCP::JP2K::MXFWriter*>(w);
+
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    ASDCP::JP2K::PictureDescriptor pd;
+    c_to_cpp_picture_desc(desc, pd);
+
+    ASDCP::Result_t result = writer->OpenWrite(std::string(filename), wi, pd, header_size);
+    if (ASDCP_FAILURE(result)) {
+        return result.Value();
+    }
+
+    if (transfer_characteristic_ul != 0) {
+        ASDCP::MXF::RGBAEssenceDescriptor* ed = 0;
+        writer->OP1aHeader().GetMDObjectByType(dict->ul(ASDCP::MDD_RGBAEssenceDescriptor),
+            reinterpret_cast<ASDCP::MXF::InterchangeObject**>(&ed));
+        if (ed == 0) {
+            return ASDCP::RESULT_FORMAT.Value();
+        }
+        ed->TransferCharacteristic = ASDCP::UL(transfer_characteristic_ul);
+    }
+    return result.Value();
+}
+
+/* Open a JP2K MXF, then set HDR/WCG metadata on the RGBAEssenceDescriptor the
+   writer created. h__ASDCPWriter rewrites the header at Finalize, so the change
+   made here after OpenWrite persists. */
+asdcp_result_t asdcp_jp2k_writer_open_write_hdr(asdcp_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const asdcp_hdr_metadata_t* hdr, uint32_t header_size) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+    ASDCP::JP2K::MXFWriter* writer = static_cast<ASDCP::JP2K::MXFWriter*>(w);
+
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    ASDCP::JP2K::PictureDescriptor pd;
+    c_to_cpp_picture_desc(desc, pd);
+
+    ASDCP::Result_t result = writer->OpenWrite(std::string(filename), wi, pd, header_size);
+    if (ASDCP_FAILURE(result)) {
+        return result.Value();
+    }
+
+    ASDCP::MXF::RGBAEssenceDescriptor* ed = 0;
+    writer->OP1aHeader().GetMDObjectByType(dict->ul(ASDCP::MDD_RGBAEssenceDescriptor),
+        reinterpret_cast<ASDCP::MXF::InterchangeObject**>(&ed));
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    apply_hdr_metadata(ed, hdr);
+    return result.Value();
+}
+
 /* ---- JP2K Reader ---- */
 asdcp_jp2k_reader_t asdcp_jp2k_reader_new(void) {
     Kumu::FileReaderFactory defaultFactory;
@@ -291,6 +418,40 @@ asdcp_result_t asdcp_jp2k_reader_read_frame(asdcp_jp2k_reader_t r, uint32_t fram
     );
     *out_size = fb.Size();
     return result.Value();
+}
+
+/* Read the TransferCharacteristic UL back off the RGBAEssenceDescriptor. */
+asdcp_result_t asdcp_jp2k_reader_read_transfer_characteristic(asdcp_jp2k_reader_t r,
+    uint8_t* out_ul, int32_t* has_transfer_characteristic) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+    ASDCP::JP2K::MXFReader* reader = static_cast<ASDCP::JP2K::MXFReader*>(r);
+
+    *has_transfer_characteristic = 0;
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(dict->ul(ASDCP::MDD_RGBAEssenceDescriptor), &obj);
+    ASDCP::MXF::RGBAEssenceDescriptor* ed = dynamic_cast<ASDCP::MXF::RGBAEssenceDescriptor*>(obj);
+    if (ed != 0 && !ed->TransferCharacteristic.empty()) {
+        memcpy(out_ul, ed->TransferCharacteristic.const_get().Value(), 16);
+        *has_transfer_characteristic = 1;
+    }
+    return ASDCP::RESULT_OK.Value();
+}
+
+/* Read all HDR/WCG metadata back off the RGBAEssenceDescriptor. */
+asdcp_result_t asdcp_jp2k_reader_read_hdr(asdcp_jp2k_reader_t r, asdcp_hdr_metadata_t* hdr) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+    ASDCP::JP2K::MXFReader* reader = static_cast<ASDCP::JP2K::MXFReader*>(r);
+
+    memset(hdr, 0, sizeof(*hdr));
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(dict->ul(ASDCP::MDD_RGBAEssenceDescriptor), &obj);
+    ASDCP::MXF::GenericPictureEssenceDescriptor* ed =
+        dynamic_cast<ASDCP::MXF::GenericPictureEssenceDescriptor*>(obj);
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    read_hdr_metadata(ed, hdr);
+    return ASDCP::RESULT_OK.Value();
 }
 
 /* ---- PCM Writer ---- */
@@ -823,8 +984,13 @@ void asdcp_as02_jp2k_writer_free(asdcp_as02_jp2k_writer_t w) {
     delete static_cast<AS_02::JP2K::MXFWriter*>(w);
 }
 
-asdcp_result_t asdcp_as02_jp2k_writer_open_write(asdcp_as02_jp2k_writer_t w, const char* filename,
-    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc, uint32_t header_size) {
+/* Build the AS-02 RGBA descriptor and open for writing. When hdr is non-null its
+   HDR/WCG metadata is set on the descriptor before OpenWrite, so it is present in
+   the header the writer serializes (SetSourceStream writes it during OpenWrite and
+   WriteAS02Footer rewrites it at Finalize). */
+static asdcp_result_t as02_jp2k_open_write(asdcp_as02_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const asdcp_hdr_metadata_t* hdr, uint32_t header_size) {
     const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
 
     ASDCP::WriterInfo wi;
@@ -857,9 +1023,24 @@ asdcp_result_t asdcp_as02_jp2k_writer_open_write(asdcp_as02_jp2k_writer_t w, con
     ed->ScanningDirection = 0;
     ed->PixelLayout = ASDCP::MXF::RGBALayout(ASDCP::MXF::RGBAValue_RGB_8);
 
+    if (hdr != 0) {
+        apply_hdr_metadata(ed, hdr);
+    }
+
     ASDCP::MXF::FileDescriptor* fd = static_cast<ASDCP::MXF::FileDescriptor*>(ed);
     return static_cast<AS_02::JP2K::MXFWriter*>(w)->OpenWrite(
         std::string(filename), wi, fd, subs, pd.EditRate, header_size).Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_writer_open_write(asdcp_as02_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc, uint32_t header_size) {
+    return as02_jp2k_open_write(w, filename, info, desc, 0, header_size);
+}
+
+asdcp_result_t asdcp_as02_jp2k_writer_open_write_hdr(asdcp_as02_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const asdcp_hdr_metadata_t* hdr, uint32_t header_size) {
+    return as02_jp2k_open_write(w, filename, info, desc, hdr, header_size);
 }
 
 asdcp_result_t asdcp_as02_jp2k_writer_write_frame(asdcp_as02_jp2k_writer_t w,
@@ -937,6 +1118,26 @@ asdcp_result_t asdcp_as02_jp2k_reader_fill_picture_descriptor(asdcp_as02_jp2k_re
         cpp_to_c_picture_desc(pd, desc);
     }
     return result.Value();
+}
+
+/* Read all HDR/WCG metadata off the AS-02 picture essence descriptor. */
+asdcp_result_t asdcp_as02_jp2k_reader_read_hdr(asdcp_as02_jp2k_reader_t r, asdcp_hdr_metadata_t* hdr) {
+    AS_02::JP2K::MXFReader* reader = static_cast<AS_02::JP2K::MXFReader*>(r);
+    const ASDCP::Dictionary& dict = ASDCP::DefaultCompositeDict();
+
+    memset(hdr, 0, sizeof(*hdr));
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(dict.ul(ASDCP::MDD_RGBAEssenceDescriptor), &obj);
+    if (obj == 0) {
+        reader->OP1aHeader().GetMDObjectByType(dict.ul(ASDCP::MDD_CDCIEssenceDescriptor), &obj);
+    }
+    ASDCP::MXF::GenericPictureEssenceDescriptor* ed =
+        dynamic_cast<ASDCP::MXF::GenericPictureEssenceDescriptor*>(obj);
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    read_hdr_metadata(ed, hdr);
+    return ASDCP::RESULT_OK.Value();
 }
 
 asdcp_result_t asdcp_as02_jp2k_reader_fill_writer_info(asdcp_as02_jp2k_reader_t r, asdcp_writer_info_t* info) {

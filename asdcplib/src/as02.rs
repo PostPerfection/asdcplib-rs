@@ -13,7 +13,7 @@ pub mod jp2k {
     use crate::WriterInfo;
     use crate::crypto::{AesDecContext, AesEncContext, HmacContext};
     use crate::error::{self, Result};
-    use crate::jp2k::PictureDescriptor;
+    use crate::jp2k::{HdrMetadata, PictureDescriptor};
     use std::ffi::CString;
 
     /// AS-02 JPEG 2000 MXF writer.
@@ -53,6 +53,34 @@ pub mod jp2k {
                     cstr.as_ptr(),
                     &ffi_info,
                     &ffi_desc,
+                    header_size,
+                )
+            })
+        }
+
+        /// Open for writing and set HDR/WCG picture metadata (transfer
+        /// characteristic, color primaries, ST 2086 mastering display) on the
+        /// AS-02 RGBA essence descriptor.
+        pub fn open_write_hdr(
+            &mut self,
+            filename: &str,
+            info: &WriterInfo,
+            desc: &PictureDescriptor,
+            hdr: &HdrMetadata,
+            header_size: u32,
+        ) -> Result<()> {
+            let cstr = CString::new(filename)
+                .map_err(|_| crate::Error::InvalidArgument("null byte in filename"))?;
+            let ffi_info = info.to_ffi();
+            let ffi_desc = desc.to_ffi();
+            let ffi_hdr = hdr.to_ffi();
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_jp2k_writer_open_write_hdr(
+                    self.ptr,
+                    cstr.as_ptr(),
+                    &ffi_info,
+                    &ffi_desc,
+                    &ffi_hdr,
                     header_size,
                 )
             })
@@ -126,6 +154,15 @@ pub mod jp2k {
                 asdcplib_sys::asdcp_as02_jp2k_reader_fill_picture_descriptor(self.ptr, &mut ffi)
             })?;
             Ok(PictureDescriptor::from_ffi(&ffi))
+        }
+
+        /// All HDR/WCG picture metadata present on the AS-02 essence descriptor.
+        pub fn hdr_metadata(&mut self) -> Result<HdrMetadata> {
+            let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpHdrMetadata>() };
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_jp2k_reader_read_hdr(self.ptr, &mut ffi)
+            })?;
+            Ok(HdrMetadata::from_ffi(&ffi))
         }
 
         pub fn writer_info(&mut self) -> Result<WriterInfo> {

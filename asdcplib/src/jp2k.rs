@@ -5,6 +5,92 @@ use crate::error::{self, Result};
 use crate::{Rational, WriterInfo};
 use std::ffi::CString;
 
+/// SMPTE ST 2084 (PQ) transfer characteristic UL, for HDR picture essence.
+/// Defined in asdcplib MDD.cpp as `TransferCharacteristic_SMPTEST2084`.
+pub const TRANSFER_CHARACTERISTIC_ST2084: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x01, 0x01, 0x01, 0x0a, 0x00, 0x00,
+];
+
+/// ITU-R BT.2020 transfer characteristic UL (MDD.cpp `TransferCharacteristic_ITU2020`).
+pub const TRANSFER_CHARACTERISTIC_BT2020: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0e, 0x04, 0x01, 0x01, 0x01, 0x01, 0x09, 0x00, 0x00,
+];
+
+/// ITU-R BT.709 color primaries UL (MDD.cpp `ColorPrimaries_ITU709`).
+pub const COLOR_PRIMARIES_BT709: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x06, 0x04, 0x01, 0x01, 0x01, 0x03, 0x03, 0x00, 0x00,
+];
+
+/// ITU-R BT.2020 color primaries UL (MDD.cpp `ColorPrimaries_ITU2020`).
+pub const COLOR_PRIMARIES_BT2020: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x01, 0x01, 0x03, 0x04, 0x00, 0x00,
+];
+
+/// P3 D65 color primaries UL (MDD.cpp `ColorPrimaries_P3D65`).
+pub const COLOR_PRIMARIES_P3D65: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x01, 0x01, 0x03, 0x06, 0x00, 0x00,
+];
+
+/// HDR/WCG picture metadata (SMPTE ST 2067-21). Every field is optional; only
+/// those set are written. Chromaticity coordinates are raw ST 2086 u16 values
+/// (0.00002 increments), luminance raw u32 (0.0001 cd/m^2 increments).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HdrMetadata {
+    pub transfer_characteristic: Option<[u8; 16]>,
+    pub color_primaries: Option<[u8; 16]>,
+    /// ST 2086 display primaries as `[[x, y]; 3]` in First/Second/Third order.
+    pub mastering_display_primaries: Option<[[u16; 2]; 3]>,
+    pub mastering_display_white_point: Option<[u16; 2]>,
+    pub mastering_display_max_luminance: Option<u32>,
+    pub mastering_display_min_luminance: Option<u32>,
+}
+
+impl HdrMetadata {
+    pub(crate) fn to_ffi(&self) -> asdcplib_sys::AsdcpHdrMetadata {
+        let p = self.mastering_display_primaries.unwrap_or_default();
+        asdcplib_sys::AsdcpHdrMetadata {
+            has_transfer_characteristic: self.transfer_characteristic.is_some() as i32,
+            transfer_characteristic: self.transfer_characteristic.unwrap_or_default(),
+            has_color_primaries: self.color_primaries.is_some() as i32,
+            color_primaries: self.color_primaries.unwrap_or_default(),
+            has_mastering_display_primaries: self.mastering_display_primaries.is_some() as i32,
+            mastering_display_primaries: [p[0][0], p[0][1], p[1][0], p[1][1], p[2][0], p[2][1]],
+            has_mastering_display_white_point: self.mastering_display_white_point.is_some() as i32,
+            mastering_display_white_point: self.mastering_display_white_point.unwrap_or_default(),
+            has_mastering_display_max_luminance: self.mastering_display_max_luminance.is_some()
+                as i32,
+            mastering_display_max_luminance: self
+                .mastering_display_max_luminance
+                .unwrap_or_default(),
+            has_mastering_display_min_luminance: self.mastering_display_min_luminance.is_some()
+                as i32,
+            mastering_display_min_luminance: self
+                .mastering_display_min_luminance
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(crate) fn from_ffi(ffi: &asdcplib_sys::AsdcpHdrMetadata) -> Self {
+        let mp = &ffi.mastering_display_primaries;
+        Self {
+            transfer_characteristic: (ffi.has_transfer_characteristic != 0)
+                .then_some(ffi.transfer_characteristic),
+            color_primaries: (ffi.has_color_primaries != 0).then_some(ffi.color_primaries),
+            mastering_display_primaries: (ffi.has_mastering_display_primaries != 0).then_some([
+                [mp[0], mp[1]],
+                [mp[2], mp[3]],
+                [mp[4], mp[5]],
+            ]),
+            mastering_display_white_point: (ffi.has_mastering_display_white_point != 0)
+                .then_some(ffi.mastering_display_white_point),
+            mastering_display_max_luminance: (ffi.has_mastering_display_max_luminance != 0)
+                .then_some(ffi.mastering_display_max_luminance),
+            mastering_display_min_luminance: (ffi.has_mastering_display_min_luminance != 0)
+                .then_some(ffi.mastering_display_min_luminance),
+        }
+    }
+}
+
 /// JPEG 2000 picture descriptor.
 #[derive(Debug, Clone)]
 pub struct PictureDescriptor {
@@ -80,6 +166,61 @@ impl MxfWriter {
                 cstr.as_ptr(),
                 &ffi_info,
                 &ffi_desc,
+                header_size,
+            )
+        };
+        error::check(result)
+    }
+
+    /// Open for writing and set the picture essence descriptor's
+    /// TransferCharacteristic UL (e.g. [`TRANSFER_CHARACTERISTIC_ST2084`] for HDR).
+    pub fn open_write_transfer(
+        &mut self,
+        filename: &str,
+        info: &WriterInfo,
+        desc: &PictureDescriptor,
+        transfer_characteristic: &[u8; 16],
+        header_size: u32,
+    ) -> Result<()> {
+        let cstr = CString::new(filename)
+            .map_err(|_| crate::Error::InvalidArgument("null byte in filename"))?;
+        let ffi_info = info.to_ffi();
+        let ffi_desc = desc.to_ffi();
+        let result = unsafe {
+            asdcplib_sys::asdcp_jp2k_writer_open_write_transfer(
+                self.ptr,
+                cstr.as_ptr(),
+                &ffi_info,
+                &ffi_desc,
+                transfer_characteristic.as_ptr(),
+                header_size,
+            )
+        };
+        error::check(result)
+    }
+
+    /// Open for writing and set HDR/WCG picture metadata (transfer characteristic,
+    /// color primaries, ST 2086 mastering display) on the essence descriptor.
+    pub fn open_write_hdr(
+        &mut self,
+        filename: &str,
+        info: &WriterInfo,
+        desc: &PictureDescriptor,
+        hdr: &HdrMetadata,
+        header_size: u32,
+    ) -> Result<()> {
+        let cstr = CString::new(filename)
+            .map_err(|_| crate::Error::InvalidArgument("null byte in filename"))?;
+        let ffi_info = info.to_ffi();
+        let ffi_desc = desc.to_ffi();
+        let ffi_hdr = hdr.to_ffi();
+        let result = unsafe {
+            asdcplib_sys::asdcp_jp2k_writer_open_write_hdr(
+                self.ptr,
+                cstr.as_ptr(),
+                &ffi_info,
+                &ffi_desc,
+                &ffi_hdr,
                 header_size,
             )
         };
@@ -186,6 +327,28 @@ impl MxfReader {
         };
         error::check(result)?;
         Ok(out_size as usize)
+    }
+
+    /// The picture essence descriptor's TransferCharacteristic UL, or `None`
+    /// when the property is absent.
+    pub fn transfer_characteristic(&mut self) -> Result<Option<[u8; 16]>> {
+        let mut ul = [0u8; 16];
+        let mut present: i32 = 0;
+        error::check(unsafe {
+            asdcplib_sys::asdcp_jp2k_reader_read_transfer_characteristic(
+                self.ptr,
+                ul.as_mut_ptr(),
+                &mut present,
+            )
+        })?;
+        Ok((present != 0).then_some(ul))
+    }
+
+    /// All HDR/WCG picture metadata present on the essence descriptor.
+    pub fn hdr_metadata(&mut self) -> Result<HdrMetadata> {
+        let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpHdrMetadata>() };
+        error::check(unsafe { asdcplib_sys::asdcp_jp2k_reader_read_hdr(self.ptr, &mut ffi) })?;
+        Ok(HdrMetadata::from_ffi(&ffi))
     }
 }
 

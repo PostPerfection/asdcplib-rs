@@ -123,6 +123,26 @@ pub struct AsdcpAtmosDescriptor {
     pub atmos_version: u8,
 }
 
+/// HDR/WCG picture metadata (ST 2067-21), C-compatible. Fields apply only when
+/// the matching `has_*` flag is non-zero. Chromaticities are raw ST 2086 u16
+/// values, luminance raw u32; primaries are First.x,y / Second.x,y / Third.x,y.
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct AsdcpHdrMetadata {
+    pub has_transfer_characteristic: c_int,
+    pub transfer_characteristic: [u8; 16],
+    pub has_color_primaries: c_int,
+    pub color_primaries: [u8; 16],
+    pub has_mastering_display_primaries: c_int,
+    pub mastering_display_primaries: [u16; 6],
+    pub has_mastering_display_white_point: c_int,
+    pub mastering_display_white_point: [u16; 2],
+    pub has_mastering_display_max_luminance: c_int,
+    pub mastering_display_max_luminance: u32,
+    pub has_mastering_display_min_luminance: c_int,
+    pub mastering_display_min_luminance: u32,
+}
+
 /// Essence type enum (mirrors ASDCP::EssenceType_t).
 pub type AsdcpEssenceType = c_int;
 pub const ESS_UNKNOWN: AsdcpEssenceType = 0;
@@ -215,6 +235,22 @@ unsafe extern "C" {
         hmac_ctx: *mut AsdcpHmacContext,
     ) -> AsdcpResult;
     pub fn asdcp_jp2k_writer_finalize(w: *mut AsdcpJp2kWriter) -> AsdcpResult;
+    pub fn asdcp_jp2k_writer_open_write_transfer(
+        w: *mut AsdcpJp2kWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpPictureDescriptor,
+        transfer_characteristic_ul: *const u8,
+        header_size: u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_jp2k_writer_open_write_hdr(
+        w: *mut AsdcpJp2kWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpPictureDescriptor,
+        hdr: *const AsdcpHdrMetadata,
+        header_size: u32,
+    ) -> AsdcpResult;
 
     // ---- JP2K Reader ----
     pub fn asdcp_jp2k_reader_new() -> *mut AsdcpJp2kReader;
@@ -240,6 +276,15 @@ unsafe extern "C" {
         out_size: *mut u32,
         dec_ctx: *mut AsdcpAesDecContext,
         hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+    pub fn asdcp_jp2k_reader_read_transfer_characteristic(
+        r: *mut AsdcpJp2kReader,
+        out_ul: *mut u8,
+        has_transfer_characteristic: *mut i32,
+    ) -> AsdcpResult;
+    pub fn asdcp_jp2k_reader_read_hdr(
+        r: *mut AsdcpJp2kReader,
+        hdr: *mut AsdcpHdrMetadata,
     ) -> AsdcpResult;
 
     // ---- PCM Writer ----
@@ -484,6 +529,14 @@ unsafe extern "C" {
         desc: *const AsdcpPictureDescriptor,
         header_size: u32,
     ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_writer_open_write_hdr(
+        w: *mut AsdcpAs02Jp2kWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpPictureDescriptor,
+        hdr: *const AsdcpHdrMetadata,
+        header_size: u32,
+    ) -> AsdcpResult;
     pub fn asdcp_as02_jp2k_writer_write_frame(
         w: *mut AsdcpAs02Jp2kWriter,
         frame_data: *const u8,
@@ -504,6 +557,10 @@ unsafe extern "C" {
     pub fn asdcp_as02_jp2k_reader_fill_picture_descriptor(
         r: *mut AsdcpAs02Jp2kReader,
         desc: *mut AsdcpPictureDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_read_hdr(
+        r: *mut AsdcpAs02Jp2kReader,
+        hdr: *mut AsdcpHdrMetadata,
     ) -> AsdcpResult;
     pub fn asdcp_as02_jp2k_reader_fill_writer_info(
         r: *mut AsdcpAs02Jp2kReader,
