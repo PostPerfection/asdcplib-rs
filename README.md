@@ -59,6 +59,8 @@ AS-02 (IMF, ST 2067-5) read/write, in the `as02` module:
 
 Other AS-02 essence (ISXD, ACES, IAB, JPEG XS) is detection-only via `essence_type`.
 
+The JP2K writers/readers (AS-DCP and AS-02) set and read ST 2067-21 HDR/WCG picture metadata: transfer characteristic, color primaries and the ST 2086 mastering display block. AS-DCP also has a transfer-characteristic-only path for HDR DCI Addendum DCPs. MaxCLL/MaxFALL are not supported by the vendored asdcplib.
+
 ## Building
 
 The `asdcplib-sys` crate expects the asdcplib source tree at `asdcplib-sys/asdcplib/`:

@@ -15,7 +15,7 @@
 </head>
 <body>
   <h1>asdcplib-rs</h1>
-  <p>Safe Rust readers and writers for AS-DCP (d-cinema) and AS-02/IMF JPEG 2000, PCM, and timed text MXF files, plus AS-DCP Atmos. The low-level crate builds CineCert asdcplib through CMake.</p>
+  <p>Safe Rust readers and writers for AS-DCP (d-cinema) and AS-02/IMF JPEG 2000, PCM, and timed text MXF files, plus AS-DCP Atmos. Includes ST 377-4 MCA audio labels and ST 2067-21 HDR/WCG picture metadata. The low-level crate builds CineCert asdcplib through CMake.</p>
   <h2>Verification</h2>
   <p>The integration suite writes a PCM MXF, reads its descriptor and frame back, and checks the bytes through the real C++ boundary.</p>
   <pre><code>git clone --recursive https://github.com/PostPerfection/asdcplib-rs.git
