@@ -75,4 +75,6 @@ The integration suite writes and reads a real PCM MXF to verify the safe wrapper
 
 ## License
 
-BSD-3-Clause (matches asdcplib upstream)
+AGPL-3.0-or-later. Copyright (C) 2026 Grok Image Compression Inc. See [LICENSE](LICENSE).
+
+The vendored asdcplib C++ sources keep their upstream BSD-style license.
