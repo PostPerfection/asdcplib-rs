@@ -616,6 +616,101 @@ asdcp_result_t asdcp_pcm_reader_read_mca_labels(asdcp_pcm_reader_t r,
     return ASDCP::RESULT_OK.Value();
 }
 
+/* 0 = audio channel, 1 = soundfield group, 2 = group of soundfield groups,
+   -1 = not an MCA label subdescriptor. */
+static int32_t mca_label_kind(ASDCP::MXF::InterchangeObject* obj) {
+    if (dynamic_cast<ASDCP::MXF::AudioChannelLabelSubDescriptor*>(obj) != 0) {
+        return 0;
+    }
+    if (dynamic_cast<ASDCP::MXF::SoundfieldGroupLabelSubDescriptor*>(obj) != 0) {
+        return 1;
+    }
+    if (dynamic_cast<ASDCP::MXF::GroupOfSoundfieldGroupsLabelSubDescriptor*>(obj) != 0) {
+        return 2;
+    }
+    return -1;
+}
+
+/* The WaveAudioDescriptor's SubDescriptors array keeps the order the labels
+   were written in, which the header's packet list does not promise. */
+static void collect_mca_labels(ASDCP::MXF::OP1aHeader& header,
+    std::list<ASDCP::MXF::InterchangeObject*>& labels) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    header.GetMDObjectByType(dict->ul(ASDCP::MDD_WaveAudioDescriptor), &obj);
+    ASDCP::MXF::WaveAudioDescriptor* wd = dynamic_cast<ASDCP::MXF::WaveAudioDescriptor*>(obj);
+    if (wd == 0) {
+        return;
+    }
+    for (size_t k = 0; k < wd->SubDescriptors.size(); k++) {
+        ASDCP::MXF::InterchangeObject* sub = 0;
+        ASDCP::Result_t result = header.GetMDObjectByID(wd->SubDescriptors[k], &sub);
+        if (ASDCP_FAILURE(result)) {
+            continue;
+        }
+        if (mca_label_kind(sub) >= 0) {
+            labels.push_back(sub);
+        }
+    }
+}
+
+static void copy_mca_string(const std::string& src, char* dst) {
+    size_t length = src.size();
+    if (length > ASDCP_MCA_STRING_CAPACITY - 1) {
+        length = ASDCP_MCA_STRING_CAPACITY - 1;
+    }
+    memcpy(dst, src.data(), length);
+    dst[length] = 0;
+}
+
+asdcp_result_t asdcp_pcm_reader_mca_label_count(asdcp_pcm_reader_t r, uint32_t* out_count) {
+    std::list<ASDCP::MXF::InterchangeObject*> labels;
+    collect_mca_labels(static_cast<ASDCP::PCM::MXFReader*>(r)->OP1aHeader(), labels);
+    *out_count = static_cast<uint32_t>(labels.size());
+    return ASDCP::RESULT_OK.Value();
+}
+
+asdcp_result_t asdcp_pcm_reader_mca_label_info(asdcp_pcm_reader_t r, uint32_t index,
+    asdcp_mca_label_t* out_label) {
+    std::list<ASDCP::MXF::InterchangeObject*> labels;
+    collect_mca_labels(static_cast<ASDCP::PCM::MXFReader*>(r)->OP1aHeader(), labels);
+    if (index >= labels.size()) {
+        return ASDCP::RESULT_RANGE.Value();
+    }
+    std::list<ASDCP::MXF::InterchangeObject*>::const_iterator li = labels.begin();
+    for (uint32_t k = 0; k < index; k++) {
+        ++li;
+    }
+    ASDCP::MXF::MCALabelSubDescriptor* label =
+        dynamic_cast<ASDCP::MXF::MCALabelSubDescriptor*>(*li);
+
+    memset(out_label, 0, sizeof(*out_label));
+    out_label->kind = mca_label_kind(*li);
+    copy_mca_string(label->MCATagSymbol, out_label->tag_symbol);
+    memcpy(out_label->label_dictionary_id, label->MCALabelDictionaryID.Value(), 16);
+    memcpy(out_label->link_id, label->MCALinkID.Value(), 16);
+    if (!label->MCATagName.empty()) {
+        out_label->has_tag_name = 1;
+        copy_mca_string(label->MCATagName.const_get(), out_label->tag_name);
+    }
+    if (!label->MCAChannelID.empty()) {
+        out_label->has_channel_id = 1;
+        out_label->channel_id = label->MCAChannelID.const_get();
+    }
+    if (!label->RFC5646SpokenLanguage.empty()) {
+        out_label->has_spoken_language = 1;
+        copy_mca_string(label->RFC5646SpokenLanguage.const_get(), out_label->spoken_language);
+    }
+    ASDCP::MXF::AudioChannelLabelSubDescriptor* channel =
+        dynamic_cast<ASDCP::MXF::AudioChannelLabelSubDescriptor*>(*li);
+    if (channel != 0 && !channel->SoundfieldGroupLinkID.empty()) {
+        out_label->has_soundfield_group_link_id = 1;
+        memcpy(out_label->soundfield_group_link_id,
+            channel->SoundfieldGroupLinkID.const_get().Value(), 16);
+    }
+    return ASDCP::RESULT_OK.Value();
+}
+
 /* ---- TimedText Writer ---- */
 asdcp_timed_text_writer_t asdcp_timed_text_writer_new(void) {
     return new ASDCP::TimedText::MXFWriter();

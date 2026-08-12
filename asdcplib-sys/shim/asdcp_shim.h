@@ -85,6 +85,29 @@ typedef struct {
     uint32_t mastering_display_min_luminance;
 } asdcp_hdr_metadata_t;
 
+/* asdcplib refuses to write an MCA string longer than 128 bytes, so 128 plus a
+   terminator holds anything it wrote. */
+#define ASDCP_MCA_STRING_CAPACITY 129
+
+/* One SMPTE 377-4 MCA label subdescriptor. kind is 0 = audio channel,
+   1 = soundfield group, 2 = group of soundfield groups. Strings are
+   NUL-terminated and truncated to fit. Each has_* flag guards the field below
+   it; tag_symbol, label_dictionary_id and link_id are always present. */
+typedef struct {
+    int32_t kind;
+    char tag_symbol[ASDCP_MCA_STRING_CAPACITY];
+    uint8_t label_dictionary_id[16];
+    uint8_t link_id[16];
+    int32_t has_tag_name;
+    char tag_name[ASDCP_MCA_STRING_CAPACITY];
+    int32_t has_channel_id;
+    uint32_t channel_id;
+    int32_t has_spoken_language;
+    char spoken_language[ASDCP_MCA_STRING_CAPACITY];
+    int32_t has_soundfield_group_link_id;
+    uint8_t soundfield_group_link_id[16];
+} asdcp_mca_label_t;
+
 typedef void* asdcp_jp2k_writer_t;
 typedef void* asdcp_jp2k_reader_t;
 typedef void* asdcp_pcm_writer_t;
@@ -197,6 +220,13 @@ asdcp_result_t asdcp_pcm_reader_read_frame(asdcp_pcm_reader_t r, uint32_t frame_
 asdcp_result_t asdcp_pcm_reader_read_mca_labels(asdcp_pcm_reader_t r,
     uint32_t* channel_label_count, uint32_t* soundfield_group_count,
     int32_t* has_mca_channel_assignment);
+/* Number of MCA label subdescriptors the WaveAudioDescriptor links. */
+asdcp_result_t asdcp_pcm_reader_mca_label_count(asdcp_pcm_reader_t r, uint32_t* out_count);
+/* Copy the index-th MCA label subdescriptor into out_label, in the order the
+   WaveAudioDescriptor links them. The caller owns out_label and the shim keeps
+   no reference to it. */
+asdcp_result_t asdcp_pcm_reader_mca_label_info(asdcp_pcm_reader_t r, uint32_t index,
+    asdcp_mca_label_t* out_label);
 
 /* TimedText Writer */
 asdcp_timed_text_writer_t asdcp_timed_text_writer_new(void);

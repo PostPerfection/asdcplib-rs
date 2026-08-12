@@ -264,6 +264,89 @@ impl MxfReader {
             has_mca_channel_assignment: has_assignment != 0,
         })
     }
+
+    /// Every MCA label subdescriptor the WaveAudioDescriptor links, in the
+    /// order it links them. Empty when the MXF carries no MCA labels.
+    pub fn mca_label_subdescriptors(&mut self) -> Result<Vec<McaLabelSubDescriptor>> {
+        let mut count: u32 = 0;
+        error::check(unsafe {
+            asdcplib_sys::asdcp_pcm_reader_mca_label_count(self.ptr, &mut count)
+        })?;
+        let mut labels = Vec::with_capacity(count as usize);
+        for index in 0..count {
+            let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpMcaLabel>() };
+            error::check(unsafe {
+                asdcplib_sys::asdcp_pcm_reader_mca_label_info(self.ptr, index, &mut ffi)
+            })?;
+            labels.push(McaLabelSubDescriptor::from_ffi(&ffi)?);
+        }
+        Ok(labels)
+    }
+}
+
+/// Which flavour of MCA label subdescriptor a [`McaLabelSubDescriptor`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McaLabelKind {
+    AudioChannel,
+    SoundfieldGroup,
+    GroupOfSoundfieldGroups,
+}
+
+/// One SMPTE 377-4 MCA label subdescriptor read from a PCM MXF header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McaLabelSubDescriptor {
+    pub kind: McaLabelKind,
+    /// MCATagSymbol, for example `"chVIN"`, `"chHI"`, `"SLVS"` or `"sg51"`.
+    pub tag_symbol: String,
+    /// MCALabelDictionaryID, the UL naming the label in SMPTE ST 428-12.
+    pub label_dictionary_id: [u8; 16],
+    /// MCALinkID, this subdescriptor's own identifier.
+    pub link_id: [u8; 16],
+    /// MCATagName, the human readable name, for example `"Hearing Impaired"`.
+    pub tag_name: Option<String>,
+    /// MCAChannelID, one-based, set on audio channel labels.
+    pub channel_id: Option<u32>,
+    /// RFC5646SpokenLanguage, for example `"en-US"`.
+    pub spoken_language: Option<String>,
+    /// SoundfieldGroupLinkID, the [`link_id`](Self::link_id) of the soundfield
+    /// group this channel belongs to.
+    pub soundfield_group_link_id: Option<[u8; 16]>,
+}
+
+impl McaLabelSubDescriptor {
+    fn from_ffi(ffi: &asdcplib_sys::AsdcpMcaLabel) -> Result<Self> {
+        let kind = match ffi.kind {
+            0 => McaLabelKind::AudioChannel,
+            1 => McaLabelKind::SoundfieldGroup,
+            2 => McaLabelKind::GroupOfSoundfieldGroups,
+            _ => return Err(crate::Error::InvalidArgument("unknown mca label kind")),
+        };
+        Ok(Self {
+            kind,
+            tag_symbol: mca_string(&ffi.tag_symbol)?,
+            label_dictionary_id: ffi.label_dictionary_id,
+            link_id: ffi.link_id,
+            tag_name: optional(ffi.has_tag_name, mca_string(&ffi.tag_name)?),
+            channel_id: optional(ffi.has_channel_id, ffi.channel_id),
+            spoken_language: optional(ffi.has_spoken_language, mca_string(&ffi.spoken_language)?),
+            soundfield_group_link_id: optional(
+                ffi.has_soundfield_group_link_id,
+                ffi.soundfield_group_link_id,
+            ),
+        })
+    }
+}
+
+fn optional<T>(has_value: i32, value: T) -> Option<T> {
+    if has_value != 0 { Some(value) } else { None }
+}
+
+fn mca_string(bytes: &[u8]) -> Result<String> {
+    let text = std::ffi::CStr::from_bytes_until_nul(bytes)
+        .map_err(|_| crate::Error::InvalidArgument("unterminated mca label string"))?;
+    text.to_str()
+        .map(str::to_string)
+        .map_err(|_| crate::Error::InvalidArgument("mca label string is not utf-8"))
 }
 
 /// MCA label subdescriptors found in a PCM MXF header.

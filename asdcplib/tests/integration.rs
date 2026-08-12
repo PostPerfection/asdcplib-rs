@@ -739,6 +739,179 @@ mod pcm_tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    fn mca_temp_path(tag: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "asdcplib-pcm-mca-{tag}-{}-{unique}.mxf",
+            std::process::id()
+        ))
+    }
+
+    fn mca_descriptor(channel_count: u32) -> AudioDescriptor {
+        let block_align = channel_count * 3;
+        AudioDescriptor {
+            edit_rate: Rational::new(24, 1),
+            audio_sampling_rate: Rational::new(48_000, 1),
+            locked: true,
+            channel_count,
+            quantization_bits: 24,
+            block_align,
+            avg_bps: block_align * 48_000,
+            linked_track_id: 0,
+            container_duration: 1,
+            channel_format: ChannelFormat::Cfg6,
+        }
+    }
+
+    /// Write one frame of a labelled PCM MXF, then read every MCA label
+    /// subdescriptor back out of it.
+    fn write_and_read_mca_labels(
+        path: &std::path::Path,
+        channel_count: u32,
+        mca_config: &str,
+    ) -> Vec<McaLabelSubDescriptor> {
+        let path_string = path.to_string_lossy().to_string();
+        let descriptor = mca_descriptor(channel_count);
+        let info = WriterInfo {
+            asset_uuid: [4; 16],
+            ..Default::default()
+        };
+        // one 24fps frame at 48kHz is 2000 samples
+        let frame = vec![0x5a; (descriptor.block_align * 2_000) as usize];
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_mca(&path_string, &info, &descriptor, mca_config, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        let labels = reader.mca_label_subdescriptors().unwrap();
+        reader.close().unwrap();
+        labels
+    }
+
+    /// A 5.1 wrap must read back the soundfield group followed by its six
+    /// channels, each carrying its tag symbol, one-based channel id and a link
+    /// back to the group.
+    #[test]
+    fn test_pcm_mca_label_subdescriptors_roundtrip() {
+        let path = mca_temp_path("symbols");
+        let labels = write_and_read_mca_labels(&path, 6, "51(L,R,C,LFE,Ls,Rs)");
+
+        let symbols: Vec<&str> = labels.iter().map(|l| l.tag_symbol.as_str()).collect();
+        assert_eq!(
+            symbols,
+            ["sg51", "chL", "chR", "chC", "chLFE", "chLs", "chRs"],
+            "tag symbols must come back in the order they were written"
+        );
+
+        let group = &labels[0];
+        assert_eq!(group.kind, McaLabelKind::SoundfieldGroup);
+        assert_eq!(group.tag_name.as_deref(), Some("5.1"));
+        assert_eq!(group.channel_id, None, "a soundfield group has no channel");
+        assert_eq!(group.soundfield_group_link_id, None);
+
+        for (offset, channel) in labels[1..].iter().enumerate() {
+            assert_eq!(channel.kind, McaLabelKind::AudioChannel);
+            assert_eq!(
+                channel.channel_id,
+                Some(offset as u32 + 1),
+                "channel ids are one-based and in wrap order"
+            );
+            assert_eq!(
+                channel.soundfield_group_link_id,
+                Some(group.link_id),
+                "every 5.1 channel links back to the soundfield group"
+            );
+            assert_eq!(channel.spoken_language.as_deref(), Some("en-US"));
+        }
+        assert_eq!(labels[1].tag_name.as_deref(), Some("Left"));
+        assert_eq!(labels[4].tag_name.as_deref(), Some("LFE"));
+        assert_ne!(
+            labels[1].label_dictionary_id, labels[2].label_dictionary_id,
+            "Left and Right must not share a label UL"
+        );
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// The accessibility channels must be distinguishable from each other and
+    /// from the main programme: hearing impaired, visually impaired narrative
+    /// and sign language video each keep their own tag symbol and name.
+    #[test]
+    fn test_pcm_mca_accessibility_labels_roundtrip() {
+        let path = mca_temp_path("access");
+        let labels = write_and_read_mca_labels(&path, 9, "51(L,R,C,LFE,Ls,Rs),HI,VIN,SLVS");
+
+        let symbols: Vec<&str> = labels.iter().map(|l| l.tag_symbol.as_str()).collect();
+        assert_eq!(
+            symbols,
+            [
+                "sg51", "chL", "chR", "chC", "chLFE", "chLs", "chRs", "chHI", "chVIN", "SLVS"
+            ]
+        );
+
+        let accessibility = &labels[7..];
+        let names: Vec<Option<&str>> = accessibility
+            .iter()
+            .map(|l| l.tag_name.as_deref())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                Some("Hearing Impaired"),
+                Some("Visually Impaired-Narrative"),
+                Some("Sign Language Video Stream")
+            ]
+        );
+        for label in accessibility {
+            assert_eq!(label.kind, McaLabelKind::AudioChannel);
+            assert_eq!(
+                label.soundfield_group_link_id, None,
+                "accessibility channels sit outside the 5.1 soundfield group"
+            );
+        }
+        assert_eq!(accessibility[0].channel_id, Some(7));
+        assert_eq!(accessibility[2].channel_id, Some(9));
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// A PCM MXF wrapped without MCA labels reports no subdescriptors.
+    #[test]
+    fn test_pcm_without_mca_labels_has_no_subdescriptors() {
+        let path = mca_temp_path("none");
+        let path_string = path.to_string_lossy().to_string();
+        let mut descriptor = mca_descriptor(6);
+        descriptor.channel_format = ChannelFormat::Cfg1;
+        let info = WriterInfo::default();
+        let frame = vec![0x5a; 36_000];
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &info, &descriptor, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        assert!(reader.mca_label_subdescriptors().unwrap().is_empty());
+        reader.close().unwrap();
+
+        std::fs::remove_file(path).unwrap();
+    }
+
     /// A label count that disagrees with the channel count must fail the wrap.
     #[test]
     fn test_pcm_mca_channel_count_mismatch_fails() {

@@ -143,6 +143,27 @@ pub struct AsdcpHdrMetadata {
     pub mastering_display_min_luminance: u32,
 }
 
+/// Capacity of each string field in [`AsdcpMcaLabel`], including the terminator.
+pub const ASDCP_MCA_STRING_CAPACITY: usize = 129;
+
+/// One SMPTE 377-4 MCA label subdescriptor (C-compatible struct).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpMcaLabel {
+    pub kind: i32, // 0=AudioChannel, 1=SoundfieldGroup, 2=GroupOfSoundfieldGroups
+    pub tag_symbol: [u8; ASDCP_MCA_STRING_CAPACITY],
+    pub label_dictionary_id: [u8; 16],
+    pub link_id: [u8; 16],
+    pub has_tag_name: c_int,
+    pub tag_name: [u8; ASDCP_MCA_STRING_CAPACITY],
+    pub has_channel_id: c_int,
+    pub channel_id: u32,
+    pub has_spoken_language: c_int,
+    pub spoken_language: [u8; ASDCP_MCA_STRING_CAPACITY],
+    pub has_soundfield_group_link_id: c_int,
+    pub soundfield_group_link_id: [u8; 16],
+}
+
 /// Essence type enum (mirrors ASDCP::EssenceType_t).
 pub type AsdcpEssenceType = c_int;
 pub const ESS_UNKNOWN: AsdcpEssenceType = 0;
@@ -344,6 +365,15 @@ unsafe extern "C" {
         channel_label_count: *mut u32,
         soundfield_group_count: *mut u32,
         has_mca_channel_assignment: *mut i32,
+    ) -> AsdcpResult;
+    pub fn asdcp_pcm_reader_mca_label_count(
+        r: *mut AsdcpPcmReader,
+        out_count: *mut u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_pcm_reader_mca_label_info(
+        r: *mut AsdcpPcmReader,
+        index: u32,
+        out_label: *mut AsdcpMcaLabel,
     ) -> AsdcpResult;
 
     // ---- TimedText Writer ----

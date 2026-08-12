@@ -16,4 +16,4 @@ Safe Rust bindings for asdcplib (SMPTE AS-DCP / AS-02 MXF).
 
 ## Testing
 
-36 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip.
+47 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip.

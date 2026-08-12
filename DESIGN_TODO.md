@@ -4,6 +4,42 @@
 
 # Done
 
+## 2026-08-12
+
+Per-subdescriptor MCA label reading on the AS-DCP PCM reader, so a caller can
+tell a visually impaired narration channel from a hearing impaired channel from
+a sign language video channel instead of only counting labels.
+
+Shim entry points `asdcp_pcm_reader_mca_label_count` and
+`asdcp_pcm_reader_mca_label_info`, following the count-plus-index convention the
+timed-text ancillary resource reader already uses. The walk goes through the
+WaveAudioDescriptor's SubDescriptors array rather than the header's packet list,
+because only that array promises the order the labels were written in. Each entry
+fills a caller-owned `asdcp_mca_label_t`: kind (audio channel, soundfield group,
+group of soundfield groups), MCATagSymbol, MCALabelDictionaryID, MCALinkID, and
+the optional MCATagName, MCAChannelID, RFC5646SpokenLanguage and
+SoundfieldGroupLinkID. Its string fields are fixed at 129 bytes because
+`UTF16String::Archive` refuses to write an MCA string longer than 128.
+
+Safe wrapper `pcm::MxfReader::mca_label_subdescriptors` returning
+`Vec<McaLabelSubDescriptor>` with `Option` fields and a `McaLabelKind` enum. The
+existing `asdcp_pcm_reader_read_mca_labels`, `mca_labels` and `McaLabelSummary`
+are unchanged. Roundtrip tested for 5.1 (exact tag symbols in wrap order,
+one-based channel ids, every channel linked to the soundfield group), for the
+accessibility channels HI, VIN and SLVS, and for an MXF with no MCA labels.
+
+Left out because nothing can write them: SoundfieldGroupLabelSubDescriptor's
+GroupOfSoundfieldGroupsLinkID and the remaining MCALabelSubDescriptor optional
+properties (MCATitle, MCATitleVersion, MCATitleSubVersion, MCAEpisode,
+MCAPartitionKind, MCAPartitionNumber, MCAAudioContentKind, MCAAudioElementKind).
+All exist on the vendored classes, but `ASDCP_MCAConfigParser` never sets any of
+them, so the writer side of this repo cannot produce a file that exercises them.
+
+Also a vendored limit rather than a binding gap: the AS-DCP label vocabulary is
+the fixed map in MXF.cpp, so HI, VIN and SLVS are the only accessibility symbols
+`ASDCP_MCAConfigParser` accepts. The IMF-only HA and VA symbols live in
+`AS02_MCAConfigParser`, which the AS-DCP PCM writer does not use.
+
 ## 2026-07-23
 
 HDR/WCG picture metadata on the AS-DCP and AS-02 (IMF) JP2K writers/readers
