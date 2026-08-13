@@ -61,11 +61,13 @@ COLOR_PRIMARIES_BT709, COLOR_PRIMARIES_BT2020, COLOR_PRIMARIES_P3D65}` (ULs read
 MDD.cpp). Roundtrip tested for AS-02 and AS-DCP with ST 2084 + BT.2020/P3D65 + full
 mastering display, plus absent-metadata cases.
 
-Not supported by the vendored asdcplib: MaxCLL (MaximumContentLightLevel) and MaxFALL
-(MaximumFrameAverageLightLevel). No such property exists on
-`GenericPictureEssenceDescriptor` (Metadata.h) or anywhere in the vendored tree, and
-no MDD entry defines their ULs, so they are not settable without patching the C++.
-Everything else ST 2067-21 needs for HDR essence descriptors is present.
+MaxCLL and MaxFALL are deliberately absent, and that is correct rather than a gap.
+ST 2067-21 carries MaximumContentLightLevel and MaximumFrameAverageLightLevel in the
+CPL ExtensionProperties (`app2e-2016.xsd`, both `xs:unsignedShort`), not in the MXF
+header metadata, so SMPTE defined no descriptor membership for them. The registered
+ULs that do exist belong to an ST 2108-2 serial-interface pack, not to
+`GenericPictureEssenceDescriptor`. imfwizard writes both into the CPL. Everything
+ST 2067-21 needs from the essence descriptor is present here.
 
 ## 2026-07-22
 
