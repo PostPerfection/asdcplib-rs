@@ -495,7 +495,7 @@ asdcp_result_t asdcp_pcm_writer_finalize(asdcp_pcm_writer_t w) {
    and link it from the WaveAudioDescriptor with the MCA ChannelAssignment. */
 asdcp_result_t asdcp_pcm_writer_open_write_mca(asdcp_pcm_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc,
-    const char* mca_config, uint32_t header_size) {
+    const char* mca_config, const char* mca_language, uint32_t header_size) {
     const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
     ASDCP::PCM::MXFWriter* writer = static_cast<ASDCP::PCM::MXFWriter*>(w);
 
@@ -505,7 +505,10 @@ asdcp_result_t asdcp_pcm_writer_open_write_mca(asdcp_pcm_writer_t w, const char*
     c_to_cpp_audio_desc(desc, ad);
 
     ASDCP::MXF::ASDCP_MCAConfigParser mca(dict);
-    if (!mca.DecodeString(std::string(mca_config))) {
+    const bool decoded = (mca_language == 0 || mca_language[0] == '\0')
+        ? mca.DecodeString(std::string(mca_config))
+        : mca.DecodeString(std::string(mca_config), std::string(mca_language));
+    if (!decoded) {
         return ASDCP::RESULT_FORMAT.Value();
     }
 

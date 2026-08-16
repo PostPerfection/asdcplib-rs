@@ -716,6 +716,7 @@ mod pcm_tests {
                     &info,
                     &descriptor,
                     "51(L,R,C,LFE,Ls,Rs)",
+                    None,
                     16_384,
                 )
                 .unwrap();
@@ -772,6 +773,7 @@ mod pcm_tests {
         path: &std::path::Path,
         channel_count: u32,
         mca_config: &str,
+        mca_language: Option<&str>,
     ) -> Vec<McaLabelSubDescriptor> {
         let path_string = path.to_string_lossy().to_string();
         let descriptor = mca_descriptor(channel_count);
@@ -785,7 +787,14 @@ mod pcm_tests {
         {
             let mut writer = MxfWriter::new();
             writer
-                .open_write_mca(&path_string, &info, &descriptor, mca_config, 16_384)
+                .open_write_mca(
+                    &path_string,
+                    &info,
+                    &descriptor,
+                    mca_config,
+                    mca_language,
+                    16_384,
+                )
                 .unwrap();
             writer.write_frame(&frame, None, None).unwrap();
             writer.finalize().unwrap();
@@ -804,7 +813,7 @@ mod pcm_tests {
     #[test]
     fn test_pcm_mca_label_subdescriptors_roundtrip() {
         let path = mca_temp_path("symbols");
-        let labels = write_and_read_mca_labels(&path, 6, "51(L,R,C,LFE,Ls,Rs)");
+        let labels = write_and_read_mca_labels(&path, 6, "51(L,R,C,LFE,Ls,Rs)", None);
 
         let symbols: Vec<&str> = labels.iter().map(|l| l.tag_symbol.as_str()).collect();
         assert_eq!(
@@ -849,7 +858,7 @@ mod pcm_tests {
     #[test]
     fn test_pcm_mca_accessibility_labels_roundtrip() {
         let path = mca_temp_path("access");
-        let labels = write_and_read_mca_labels(&path, 9, "51(L,R,C,LFE,Ls,Rs),HI,VIN,SLVS");
+        let labels = write_and_read_mca_labels(&path, 9, "51(L,R,C,LFE,Ls,Rs),HI,VIN,SLVS", None);
 
         let symbols: Vec<&str> = labels.iter().map(|l| l.tag_symbol.as_str()).collect();
         assert_eq!(
@@ -881,6 +890,45 @@ mod pcm_tests {
         }
         assert_eq!(accessibility[0].channel_id, Some(7));
         assert_eq!(accessibility[2].channel_id, Some(9));
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// The requested RFC 5646 tag must land on the soundfield group and every
+    /// channel label.
+    #[test]
+    fn test_pcm_mca_spoken_language_roundtrip() {
+        let path = mca_temp_path("language");
+        let labels = write_and_read_mca_labels(&path, 6, "51(L,R,C,LFE,Ls,Rs)", Some("fr-CA"));
+
+        assert_eq!(labels.len(), 7);
+        for label in &labels {
+            assert_eq!(
+                label.spoken_language.as_deref(),
+                Some("fr-CA"),
+                "{} must carry the requested language",
+                label.tag_symbol
+            );
+        }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// Without a language, asdcplib's own default must come back.
+    #[test]
+    fn test_pcm_mca_default_spoken_language_is_en_us() {
+        let path = mca_temp_path("default-language");
+        let labels = write_and_read_mca_labels(&path, 6, "51(L,R,C,LFE,Ls,Rs)", None);
+
+        assert_eq!(labels.len(), 7);
+        for label in &labels {
+            assert_eq!(
+                label.spoken_language.as_deref(),
+                Some("en-US"),
+                "{} must carry the default language",
+                label.tag_symbol
+            );
+        }
 
         std::fs::remove_file(path).unwrap();
     }
@@ -946,6 +994,7 @@ mod pcm_tests {
                     &info,
                     &descriptor,
                     "51(L,R,C,LFE,Ls,Rs)",
+                    None,
                     16_384
                 )
                 .is_err()

@@ -202,10 +202,12 @@ asdcp_result_t asdcp_pcm_writer_write_frame(asdcp_pcm_writer_t w,
 asdcp_result_t asdcp_pcm_writer_finalize(asdcp_pcm_writer_t w);
 
 /* Open a PCM MXF and attach SMPTE 377-4 MCA label subdescriptors. mca_config is
-   an asdcp-wrap style config string, e.g. "51(L,R,C,LFE,Ls,Rs),HI,VIN". */
+   an asdcp-wrap style config string, e.g. "51(L,R,C,LFE,Ls,Rs),HI,VIN".
+   mca_language is the RFC 5646 tag every label carries, NULL or empty for
+   asdcplib's own default. */
 asdcp_result_t asdcp_pcm_writer_open_write_mca(asdcp_pcm_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc,
-    const char* mca_config, uint32_t header_size);
+    const char* mca_config, const char* mca_language, uint32_t header_size);
 
 /* PCM Reader */
 asdcp_pcm_reader_t asdcp_pcm_reader_new(void);

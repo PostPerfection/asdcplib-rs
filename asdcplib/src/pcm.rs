@@ -138,18 +138,29 @@ impl MxfWriter {
     /// `mca_config` is an asdcp-wrap style config string, e.g.
     /// `"51(L,R,C,LFE,Ls,Rs),HI,VIN"`. The label count must match the
     /// descriptor's channel count or the call fails.
+    ///
+    /// `mca_language` is the RFC 5646 spoken language written on every MCA
+    /// label, asdcplib's default `en-US` when `None`.
     pub fn open_write_mca(
         &mut self,
         filename: &str,
         info: &WriterInfo,
         desc: &AudioDescriptor,
         mca_config: &str,
+        mca_language: Option<&str>,
         header_size: u32,
     ) -> Result<()> {
         let cstr = CString::new(filename)
             .map_err(|_| crate::Error::InvalidArgument("null byte in filename"))?;
         let mca = CString::new(mca_config)
             .map_err(|_| crate::Error::InvalidArgument("null byte in mca config"))?;
+        let language = mca_language
+            .map(CString::new)
+            .transpose()
+            .map_err(|_| crate::Error::InvalidArgument("null byte in mca language"))?;
+        let language_ptr = language
+            .as_ref()
+            .map_or(std::ptr::null(), |value| value.as_ptr());
         let ffi_info = info.to_ffi();
         let ffi_desc = desc.to_ffi();
         error::check(unsafe {
@@ -159,6 +170,7 @@ impl MxfWriter {
                 &ffi_info,
                 &ffi_desc,
                 mca.as_ptr(),
+                language_ptr,
                 header_size,
             )
         })

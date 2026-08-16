@@ -332,6 +332,7 @@ unsafe extern "C" {
         info: *const AsdcpWriterInfo,
         desc: *const AsdcpAudioDescriptor,
         mca_config: *const c_char,
+        mca_language: *const c_char,
         header_size: u32,
     ) -> AsdcpResult;
 
