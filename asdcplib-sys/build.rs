@@ -10,7 +10,9 @@ fn main() {
     cmake_cfg
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON")
-        .define("CMAKE_POLICY_VERSION_MINIMUM", "3.5");
+        .define("CMAKE_POLICY_VERSION_MINIMUM", "3.5")
+        // vcpkg copies each tool's dlls beside it, and 17 tools doing that in parallel collide
+        .define("VCPKG_APPLOCAL_DEPS", "OFF");
 
     // Auto-detect vcpkg toolchain file on Windows so CMake can find OpenSSL
     if is_windows && env::var("CMAKE_TOOLCHAIN_FILE").is_err() {
