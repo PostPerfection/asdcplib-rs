@@ -14,9 +14,23 @@ mod util {
         ))
     }
 
+    pub const CINEMA_2K_FIXTURE: &str = "cinema2k_64x64.j2c";
+    pub const IMF_4K_FIXTURE: &str = "imf4k_black_3840x2160.j2c";
+
+    /// A real JPEG 2000 codestream from `tests/fixtures`. Building a
+    /// `PictureDescriptor` needs one of these: the synthetic stub below carries
+    /// no SIZ payload, COD or QCD for the parser to read.
+    pub fn fixture(name: &str) -> Vec<u8> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name);
+        std::fs::read(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    }
+
     /// Synthetic JPEG 2000 codestream: real SOC/SIZ/SOD/EOC markers wrapped
     /// around filler. asdcplib stores frames opaquely, so this is enough to
-    /// prove the bytes survive a write/read cycle.
+    /// prove the bytes survive a write/read cycle, and giving every frame its
+    /// own seed and length catches a frame mix-up.
     pub fn synthetic_j2c(seed: u8, len: usize) -> Vec<u8> {
         assert!(len > 8, "need room for the markers");
         let mut data = vec![0xff, 0x4f, 0xff, 0x51]; // SOC, SIZ
@@ -205,31 +219,57 @@ mod jp2k_tests {
         let _writer = StereoMxfWriter::new();
     }
 
+    /// The cinema fixture's SIZ, COD and QCD values, read straight off the file.
+    #[test]
+    fn test_codestream_header_parse() {
+        let codestream =
+            CodestreamHeader::parse(&crate::util::fixture(crate::util::CINEMA_2K_FIXTURE)).unwrap();
+
+        assert_eq!(codestream.rsize, 0x0003);
+        assert_eq!(codestream.xsize, 64);
+        assert_eq!(codestream.ysize, 64);
+        assert_eq!(codestream.x_osize, 0);
+        assert_eq!(codestream.y_osize, 0);
+        assert_eq!(codestream.xt_size, 64);
+        assert_eq!(codestream.yt_size, 64);
+        assert_eq!(codestream.components.len(), 3);
+        for component in &codestream.components {
+            assert_eq!(component.bit_depth(), 12);
+            assert!(!component.is_signed());
+            assert_eq!(component.x_rsize, 1);
+            assert_eq!(component.y_rsize, 1);
+        }
+        assert!(codestream.quantization_default.spqcd.len() > 1);
+    }
+
+    /// Nothing but a codestream builds a `CodestreamHeader`, so filler cannot
+    /// reach the sub-descriptor.
+    #[test]
+    fn test_codestream_header_rejects_non_codestream() {
+        assert!(CodestreamHeader::parse(&crate::util::synthetic_j2c(0x11, 4096)).is_err());
+    }
+
     #[test]
     fn test_picture_descriptor_fields() {
-        let desc = PictureDescriptor {
-            edit_rate: asdcplib::Rational::new(24, 1),
-            sample_rate: asdcplib::Rational::new(24, 1),
-            stored_width: 2048,
-            stored_height: 1080,
-            aspect_ratio: asdcplib::Rational::new(1998, 1080),
-            container_duration: 24 * 60, // 1 minute
-            component_count: 3,
-        };
-        assert_eq!(desc.stored_width, 2048);
-        assert_eq!(desc.stored_height, 1080);
+        let desc = descriptor(24 * 60);
+        assert_eq!(desc.stored_width, 64);
+        assert_eq!(desc.stored_height, 64);
         assert_eq!(desc.component_count, 3);
+        assert_eq!(desc.codestream.rsize, 0x0003);
     }
 
     fn descriptor(frames: u32) -> PictureDescriptor {
+        let codestream =
+            CodestreamHeader::parse(&crate::util::fixture(crate::util::CINEMA_2K_FIXTURE)).unwrap();
         PictureDescriptor {
             edit_rate: asdcplib::EDIT_RATE_24,
             sample_rate: asdcplib::EDIT_RATE_24,
-            stored_width: 2048,
-            stored_height: 1080,
-            aspect_ratio: asdcplib::Rational::new(1998, 1080),
+            stored_width: codestream.xsize,
+            stored_height: codestream.ysize,
+            aspect_ratio: asdcplib::Rational::new(1, 1),
             container_duration: frames,
-            component_count: 3,
+            component_count: codestream.components.len() as u16,
+            codestream,
         }
     }
 
@@ -272,8 +312,8 @@ mod jp2k_tests {
             reader.open_read(&path_string).unwrap();
 
             let desc = reader.picture_descriptor().unwrap();
-            assert_eq!(desc.stored_width, 2048);
-            assert_eq!(desc.stored_height, 1080);
+            assert_eq!(desc.stored_width, 64);
+            assert_eq!(desc.stored_height, 64);
             assert_eq!(desc.edit_rate, asdcplib::EDIT_RATE_24);
             assert_eq!(desc.container_duration, frames.len() as u32);
 
@@ -290,6 +330,47 @@ mod jp2k_tests {
             reader.close().unwrap();
         }
 
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// The JPEG2000PictureSubDescriptor must describe the codestream that was
+    /// wrapped. It used to be written all zeros, so asdcp-info reported
+    /// Xsize 0, Ysize 0 and an empty CodingStyleDefault.
+    #[test]
+    fn test_jp2k_sub_descriptor_from_codestream() {
+        let path = crate::util::temp_path("jp2k-sub-descriptor");
+        let path_string = path.to_string_lossy().to_string();
+        let frame = crate::util::fixture(crate::util::CINEMA_2K_FIXTURE);
+        let written = descriptor(1);
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &WriterInfo::default(), &written, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        let read = reader.picture_descriptor().unwrap();
+
+        assert_eq!(read.codestream.rsize, 0x0003);
+        assert_eq!(read.codestream.xsize, 64);
+        assert_eq!(read.codestream.ysize, 64);
+        assert_eq!(read.component_count, 3);
+        assert_eq!(read.codestream.components.len(), 3);
+        for component in &read.codestream.components {
+            assert_eq!(component.bit_depth(), 12);
+            assert_eq!(component.x_rsize, 1);
+            assert_eq!(component.y_rsize, 1);
+        }
+        assert_ne!(read.codestream.coding_style_default.decomposition_levels, 0);
+        // the whole header, COD and QCD included, survives the roundtrip
+        assert_eq!(read.codestream, written.codestream);
+
+        reader.close().unwrap();
         std::fs::remove_file(path).unwrap();
     }
 
@@ -579,8 +660,8 @@ mod jp2k_tests {
             reader.open_read(&path_string).unwrap();
 
             let desc = reader.picture_descriptor().unwrap();
-            assert_eq!(desc.stored_width, 2048);
-            assert_eq!(desc.stored_height, 1080);
+            assert_eq!(desc.stored_width, 64);
+            assert_eq!(desc.stored_height, 64);
 
             let mut buf = vec![0u8; 8192];
             let size = reader
@@ -1293,19 +1374,26 @@ mod as02_jp2k_tests {
     use asdcplib::WriterInfo;
     use asdcplib::as02::jp2k::*;
     use asdcplib::jp2k::{
-        COLOR_PRIMARIES_BT2020, HdrMetadata, PictureDescriptor, TRANSFER_CHARACTERISTIC_ST2084,
+        COLOR_PRIMARIES_BT2020, CodestreamHeader, HdrMetadata, PICTURE_ESSENCE_CODING_CINEMA_2K,
+        PICTURE_ESSENCE_CODING_IMF_4K_LOSSY, PictureDescriptor, TRANSFER_CHARACTERISTIC_ST2084,
     };
 
-    fn descriptor(frames: u32) -> PictureDescriptor {
+    fn descriptor_for(fixture_name: &str, frames: u32) -> PictureDescriptor {
+        let codestream = CodestreamHeader::parse(&crate::util::fixture(fixture_name)).unwrap();
         PictureDescriptor {
             edit_rate: asdcplib::EDIT_RATE_24,
             sample_rate: asdcplib::EDIT_RATE_24,
-            stored_width: 2048,
-            stored_height: 1080,
-            aspect_ratio: asdcplib::Rational::new(1998, 1080),
+            stored_width: codestream.xsize,
+            stored_height: codestream.ysize,
+            aspect_ratio: asdcplib::Rational::new(codestream.xsize as i32, codestream.ysize as i32),
             container_duration: frames,
-            component_count: 3,
+            component_count: codestream.components.len() as u16,
+            codestream,
         }
+    }
+
+    fn descriptor(frames: u32) -> PictureDescriptor {
+        descriptor_for(crate::util::IMF_4K_FIXTURE, frames)
     }
 
     #[test]
@@ -1354,8 +1442,8 @@ mod as02_jp2k_tests {
             reader.open_read(&path_string).unwrap();
 
             let desc = reader.picture_descriptor().unwrap();
-            assert_eq!(desc.stored_width, 2048);
-            assert_eq!(desc.stored_height, 1080);
+            assert_eq!(desc.stored_width, 3840);
+            assert_eq!(desc.stored_height, 2160);
             assert_eq!(desc.edit_rate, asdcplib::EDIT_RATE_24);
             assert_eq!(desc.container_duration, frames.len() as u32);
 
@@ -1372,6 +1460,84 @@ mod as02_jp2k_tests {
         }
 
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// Wrap a fixture and read back both the sub-descriptor and the RGBA
+    /// essence descriptor the AS-02 writer derived from its codestream.
+    fn assert_as02_descriptors(
+        fixture_name: &str,
+        expected_picture_essence_coding: [u8; 16],
+        expected_rsize: u16,
+        expected_size: (u32, u32),
+    ) {
+        let path = crate::util::temp_path("as02-jp2k-descriptors");
+        let path_string = path.to_string_lossy().to_string();
+        let frame = crate::util::fixture(fixture_name);
+        let written = descriptor_for(fixture_name, 1);
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &WriterInfo::default(), &written, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+
+        let read = reader.picture_descriptor().unwrap();
+        assert_eq!(read.codestream.rsize, expected_rsize);
+        assert_eq!(read.codestream.xsize, expected_size.0);
+        assert_eq!(read.codestream.ysize, expected_size.1);
+        assert_eq!(read.component_count, 3);
+        assert_eq!(read.codestream.components.len(), 3);
+        for component in &read.codestream.components {
+            assert_eq!(component.bit_depth(), 12);
+            assert_eq!(component.x_rsize, 1);
+            assert_eq!(component.y_rsize, 1);
+        }
+        assert_eq!(read.codestream, written.codestream);
+
+        let rgba = reader.rgba_descriptor().unwrap();
+        assert_eq!(
+            rgba.picture_essence_coding,
+            Some(expected_picture_essence_coding)
+        );
+        // 12-bit RGB, so RGBAValue_RGB_12
+        assert_eq!(
+            rgba.pixel_layout,
+            [b'R', 12, b'G', 12, b'B', 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(rgba.component_max_ref, Some(4095));
+        assert_eq!(rgba.component_min_ref, Some(0));
+
+        reader.close().unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// An IMF 4K lossy codestream (Rsiz 0x0536) must land as the IMF 4K Lossy
+    /// label, not the Broadcast Profile 1 label the writer used to hardcode.
+    #[test]
+    fn test_as02_jp2k_descriptors_imf_4k() {
+        assert_as02_descriptors(
+            crate::util::IMF_4K_FIXTURE,
+            PICTURE_ESSENCE_CODING_IMF_4K_LOSSY,
+            0x0536,
+            (3840, 2160),
+        );
+    }
+
+    /// A DCI cinema codestream (Rsiz 0x0003) maps to the 2K cinema label.
+    #[test]
+    fn test_as02_jp2k_descriptors_cinema_2k() {
+        assert_as02_descriptors(
+            crate::util::CINEMA_2K_FIXTURE,
+            PICTURE_ESSENCE_CODING_CINEMA_2K,
+            0x0003,
+            (64, 64),
+        );
     }
 
     /// Write an AS-02 JP2K MXF with ST 2084 transfer, BT.2020 primaries and a

@@ -16,6 +16,20 @@ pub mod jp2k {
     use crate::jp2k::{HdrMetadata, PictureDescriptor};
     use std::ffi::CString;
 
+    /// The RGBA essence descriptor properties an IMF picture track carries
+    /// beyond the shared [`PictureDescriptor`]. The writer derives all of them
+    /// from the codestream header.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct RgbaDescriptor {
+        /// The profile label, e.g. [`crate::jp2k::PICTURE_ESSENCE_CODING_IMF_4K_LOSSY`].
+        pub picture_essence_coding: Option<[u8; 16]>,
+        /// SMPTE 377 pixel layout: component code and bit depth pairs,
+        /// zero-terminated.
+        pub pixel_layout: [u8; 16],
+        pub component_max_ref: Option<u32>,
+        pub component_min_ref: Option<u32>,
+    }
+
     /// AS-02 JPEG 2000 MXF writer.
     pub struct MxfWriter {
         ptr: *mut asdcplib_sys::AsdcpAs02Jp2kWriter,
@@ -154,6 +168,24 @@ pub mod jp2k {
                 asdcplib_sys::asdcp_as02_jp2k_reader_fill_picture_descriptor(self.ptr, &mut ffi)
             })?;
             Ok(PictureDescriptor::from_ffi(&ffi))
+        }
+
+        /// The RGBA essence descriptor's profile label, pixel layout and
+        /// component reference levels.
+        pub fn rgba_descriptor(&mut self) -> Result<RgbaDescriptor> {
+            let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpRgbaDescriptor>() };
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_jp2k_reader_read_rgba_descriptor(self.ptr, &mut ffi)
+            })?;
+            Ok(RgbaDescriptor {
+                picture_essence_coding: (ffi.has_picture_essence_coding != 0)
+                    .then_some(ffi.picture_essence_coding),
+                pixel_layout: ffi.pixel_layout,
+                component_max_ref: (ffi.has_component_max_ref != 0)
+                    .then_some(ffi.component_max_ref),
+                component_min_ref: (ffi.has_component_min_ref != 0)
+                    .then_some(ffi.component_min_ref),
+            })
         }
 
         /// All HDR/WCG picture metadata present on the AS-02 essence descriptor.

@@ -6,6 +6,7 @@
 #include <MXF.h>
 #include <MDD.h>
 #include <KM_fileio.h>
+#include <KM_memio.h>
 #include <cstring>
 #include <string>
 #include <list>
@@ -48,6 +49,109 @@ static void cpp_to_c_writer_info(const ASDCP::WriterInfo& cpp, asdcp_writer_info
     c->label_set_type = static_cast<int32_t>(cpp.LabelSetType);
 }
 
+static void c_to_cpp_codestream_header(const asdcp_codestream_header_t* c,
+    ASDCP::JP2K::PictureDescriptor& cpp) {
+    cpp.Rsize = c->rsize;
+    cpp.Xsize = c->xsize;
+    cpp.Ysize = c->ysize;
+    cpp.XOsize = c->x_osize;
+    cpp.YOsize = c->y_osize;
+    cpp.XTsize = c->xt_size;
+    cpp.YTsize = c->yt_size;
+    cpp.XTOsize = c->xt_osize;
+    cpp.YTOsize = c->yt_osize;
+
+    for (uint32_t i = 0; i < ASDCP_JP2K_MAX_COMPONENTS; ++i) {
+        cpp.ImageComponents[i].Ssize = c->image_components[i].ssize;
+        cpp.ImageComponents[i].XRsize = c->image_components[i].x_rsize;
+        cpp.ImageComponents[i].YRsize = c->image_components[i].y_rsize;
+    }
+
+    const asdcp_coding_style_default_t* cod = &c->coding_style_default;
+    cpp.CodingStyleDefault.Scod = cod->scod;
+    cpp.CodingStyleDefault.SGcod.ProgressionOrder = cod->progression_order;
+    cpp.CodingStyleDefault.SGcod.NumberOfLayers[0] = cod->number_of_layers[0];
+    cpp.CodingStyleDefault.SGcod.NumberOfLayers[1] = cod->number_of_layers[1];
+    cpp.CodingStyleDefault.SGcod.MultiCompTransform = cod->multi_component_transform;
+    cpp.CodingStyleDefault.SPcod.DecompositionLevels = cod->decomposition_levels;
+    cpp.CodingStyleDefault.SPcod.CodeblockWidth = cod->codeblock_width;
+    cpp.CodingStyleDefault.SPcod.CodeblockHeight = cod->codeblock_height;
+    cpp.CodingStyleDefault.SPcod.CodeblockStyle = cod->codeblock_style;
+    cpp.CodingStyleDefault.SPcod.Transformation = cod->transformation;
+    memcpy(cpp.CodingStyleDefault.SPcod.PrecinctSize, cod->precinct_sizes,
+           ASDCP_JP2K_MAX_PRECINCT_SIZES);
+
+    cpp.QuantizationDefault.Sqcd = c->quantization_default.sqcd;
+    memcpy(cpp.QuantizationDefault.SPqcd, c->quantization_default.spqcd,
+           ASDCP_JP2K_MAX_QUANTIZATION_STEPS);
+    cpp.QuantizationDefault.SPqcdLength = c->quantization_default.spqcd_length;
+
+    cpp.ExtendedCapabilities.Pcap = c->extended_capabilities.pcap;
+    cpp.ExtendedCapabilities.N = c->extended_capabilities.capability_count;
+    for (uint32_t i = 0; i < ASDCP_JP2K_MAX_CAPABILITIES; ++i) {
+        cpp.ExtendedCapabilities.Ccap[i] = c->extended_capabilities.ccap[i];
+    }
+}
+
+static void cpp_to_c_codestream_header(const ASDCP::JP2K::PictureDescriptor& cpp,
+    asdcp_codestream_header_t* c) {
+    memset(c, 0, sizeof(*c));
+    c->rsize = cpp.Rsize;
+    c->xsize = cpp.Xsize;
+    c->ysize = cpp.Ysize;
+    c->x_osize = cpp.XOsize;
+    c->y_osize = cpp.YOsize;
+    c->xt_size = cpp.XTsize;
+    c->yt_size = cpp.YTsize;
+    c->xt_osize = cpp.XTOsize;
+    c->yt_osize = cpp.YTOsize;
+
+    for (uint32_t i = 0; i < ASDCP_JP2K_MAX_COMPONENTS; ++i) {
+        c->image_components[i].ssize = cpp.ImageComponents[i].Ssize;
+        c->image_components[i].x_rsize = cpp.ImageComponents[i].XRsize;
+        c->image_components[i].y_rsize = cpp.ImageComponents[i].YRsize;
+    }
+
+    asdcp_coding_style_default_t* cod = &c->coding_style_default;
+    cod->scod = cpp.CodingStyleDefault.Scod;
+    cod->progression_order = cpp.CodingStyleDefault.SGcod.ProgressionOrder;
+    cod->number_of_layers[0] = cpp.CodingStyleDefault.SGcod.NumberOfLayers[0];
+    cod->number_of_layers[1] = cpp.CodingStyleDefault.SGcod.NumberOfLayers[1];
+    cod->multi_component_transform = cpp.CodingStyleDefault.SGcod.MultiCompTransform;
+    cod->decomposition_levels = cpp.CodingStyleDefault.SPcod.DecompositionLevels;
+    cod->codeblock_width = cpp.CodingStyleDefault.SPcod.CodeblockWidth;
+    cod->codeblock_height = cpp.CodingStyleDefault.SPcod.CodeblockHeight;
+    cod->codeblock_style = cpp.CodingStyleDefault.SPcod.CodeblockStyle;
+    cod->transformation = cpp.CodingStyleDefault.SPcod.Transformation;
+    memcpy(cod->precinct_sizes, cpp.CodingStyleDefault.SPcod.PrecinctSize,
+           ASDCP_JP2K_MAX_PRECINCT_SIZES);
+
+    c->quantization_default.sqcd = cpp.QuantizationDefault.Sqcd;
+    memcpy(c->quantization_default.spqcd, cpp.QuantizationDefault.SPqcd,
+           ASDCP_JP2K_MAX_QUANTIZATION_STEPS);
+    c->quantization_default.spqcd_length = cpp.QuantizationDefault.SPqcdLength;
+
+    c->extended_capabilities.pcap = cpp.ExtendedCapabilities.Pcap;
+    c->extended_capabilities.capability_count = cpp.ExtendedCapabilities.N;
+    for (uint32_t i = 0; i < ASDCP_JP2K_MAX_CAPABILITIES; ++i) {
+        c->extended_capabilities.ccap[i] = cpp.ExtendedCapabilities.Ccap[i];
+    }
+}
+
+asdcp_result_t asdcp_jp2k_parse_codestream_header(const uint8_t* codestream, uint32_t size,
+    asdcp_codestream_header_t* out) {
+    ASDCP::JP2K::FrameBuffer fb;
+    fb.SetData(const_cast<uint8_t*>(codestream), size);
+    fb.Size(size);
+
+    ASDCP::JP2K::PictureDescriptor pd = ASDCP::JP2K::PictureDescriptor();
+    ASDCP::Result_t result = ASDCP::JP2K::ParseMetadataIntoDesc(fb, pd);
+    if (ASDCP_SUCCESS(result)) {
+        cpp_to_c_codestream_header(pd, out);
+    }
+    return result.Value();
+}
+
 /* Helper: convert C picture desc to C++ */
 static void c_to_cpp_picture_desc(const asdcp_picture_descriptor_t* c, ASDCP::JP2K::PictureDescriptor& cpp) {
     cpp = ASDCP::JP2K::PictureDescriptor();
@@ -58,9 +162,11 @@ static void c_to_cpp_picture_desc(const asdcp_picture_descriptor_t* c, ASDCP::JP
     cpp.AspectRatio = ASDCP::Rational(c->aspect_ratio.numerator, c->aspect_ratio.denominator);
     cpp.ContainerDuration = c->container_duration;
     cpp.Csize = c->csize;
+    c_to_cpp_codestream_header(&c->codestream, cpp);
 }
 
 static void cpp_to_c_picture_desc(const ASDCP::JP2K::PictureDescriptor& cpp, asdcp_picture_descriptor_t* c) {
+    cpp_to_c_codestream_header(cpp, &c->codestream);
     c->edit_rate.numerator = cpp.EditRate.Numerator;
     c->edit_rate.denominator = cpp.EditRate.Denominator;
     c->sample_rate.numerator = cpp.SampleRate.Numerator;
@@ -1082,6 +1188,61 @@ void asdcp_as02_jp2k_writer_free(asdcp_as02_jp2k_writer_t w) {
     delete static_cast<AS_02::JP2K::MXFWriter*>(w);
 }
 
+/* Rsiz profile bits, ISO/IEC 15444-1 Amd 8. The low 12 bits carry the profile;
+   within them the IMF profiles use 0x0f00 for the family (0x0400 2K, 0x0500 4K,
+   0x0600 8K), 0x00f0 for the sub level and 0x000f for the main level. Sub level
+   0 means the profile is reversible. */
+static const uint16_t RSIZ_PROFILE_MASK = 0x0fff;
+static const uint16_t RSIZ_IMF_FAMILY_MASK = 0x0f00;
+static const uint16_t RSIZ_IMF_SUB_LEVEL_MASK = 0x00f0;
+static const uint16_t RSIZ_PROFILE_CINEMA_2K = 0x0003;
+static const uint16_t RSIZ_PROFILE_CINEMA_4K = 0x0004;
+static const uint16_t RSIZ_IMF_FAMILY_2K = 0x0400;
+static const uint16_t RSIZ_IMF_FAMILY_4K = 0x0500;
+static const uint16_t RSIZ_IMF_FAMILY_8K = 0x0600;
+
+/* Ssize packs the bit depth minus one in its low 7 bits and the signed flag in
+   the top bit. */
+static const uint8_t SSIZE_DEPTH_MASK = 0x7f;
+
+/* The PictureEssenceCoding label a codestream's Rsiz calls for. Profiles
+   asdcplib has no label for fall back to Broadcast Profile 1, which is what
+   as-02-wrap writes when no label is given on the command line. */
+static ASDCP::MDD_t essence_coding_for_rsize(uint16_t rsize) {
+    const uint16_t profile = rsize & RSIZ_PROFILE_MASK;
+    if (profile == RSIZ_PROFILE_CINEMA_2K) {
+        return ASDCP::MDD_JP2KEssenceCompression_2K;
+    }
+    if (profile == RSIZ_PROFILE_CINEMA_4K) {
+        return ASDCP::MDD_JP2KEssenceCompression_4K;
+    }
+
+    const bool reversible = (profile & RSIZ_IMF_SUB_LEVEL_MASK) == 0;
+    switch (profile & RSIZ_IMF_FAMILY_MASK) {
+        case RSIZ_IMF_FAMILY_2K:
+            return reversible ? ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Reversible
+                              : ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy;
+        case RSIZ_IMF_FAMILY_4K:
+            return reversible ? ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible
+                              : ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy;
+        case RSIZ_IMF_FAMILY_8K:
+            return reversible ? ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible
+                              : ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Lossy;
+        default:
+            return ASDCP::MDD_JP2KEssenceCompression_BroadcastProfile_1;
+    }
+}
+
+static const byte_t* rgb_pixel_layout_for_depth(uint8_t depth) {
+    switch (depth) {
+        case 8:  return ASDCP::MXF::RGBAValue_RGB_8;
+        case 10: return ASDCP::MXF::RGBAValue_RGB_10;
+        case 12: return ASDCP::MXF::RGBAValue_RGB_12;
+        case 16: return ASDCP::MXF::RGBAValue_RGB_16;
+        default: return 0;
+    }
+}
+
 /* Build the AS-02 RGBA descriptor and open for writing. When hdr is non-null its
    HDR/WCG metadata is set on the descriptor before OpenWrite, so it is present in
    the header the writer serializes (SetSourceStream writes it during OpenWrite and
@@ -1117,9 +1278,23 @@ static asdcp_result_t as02_jp2k_open_write(asdcp_as02_jp2k_writer_t w, const cha
         return result.Value();
     }
 
-    ed->PictureEssenceCoding = ASDCP::UL(dict->ul(ASDCP::MDD_JP2KEssenceCompression_BroadcastProfile_1));
+    const uint8_t component_depth =
+        (desc->codestream.image_components[0].ssize & SSIZE_DEPTH_MASK) + 1;
+    const byte_t* pixel_layout = rgb_pixel_layout_for_depth(component_depth);
+    if (pixel_layout == 0) {
+        delete ed;
+        for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
+            delete *i;
+        }
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    ed->PictureEssenceCoding =
+        ASDCP::UL(dict->ul(essence_coding_for_rsize(desc->codestream.rsize)));
     ed->ScanningDirection = 0;
-    ed->PixelLayout = ASDCP::MXF::RGBALayout(ASDCP::MXF::RGBAValue_RGB_8);
+    ed->PixelLayout = ASDCP::MXF::RGBALayout(pixel_layout);
+    ed->ComponentMaxRef = (1u << component_depth) - 1;
+    ed->ComponentMinRef = 0;
 
     if (hdr != 0) {
         apply_hdr_metadata(ed, hdr);
@@ -1216,6 +1391,42 @@ asdcp_result_t asdcp_as02_jp2k_reader_fill_picture_descriptor(asdcp_as02_jp2k_re
         cpp_to_c_picture_desc(pd, desc);
     }
     return result.Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_rgba_descriptor_t* out) {
+    AS_02::JP2K::MXFReader* reader = static_cast<AS_02::JP2K::MXFReader*>(r);
+    const ASDCP::Dictionary& dict = ASDCP::DefaultCompositeDict();
+
+    memset(out, 0, sizeof(*out));
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(dict.ul(ASDCP::MDD_RGBAEssenceDescriptor), &obj);
+    ASDCP::MXF::RGBAEssenceDescriptor* ed =
+        dynamic_cast<ASDCP::MXF::RGBAEssenceDescriptor*>(obj);
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    if (ed->PictureEssenceCoding.HasValue()) {
+        memcpy(out->picture_essence_coding, ed->PictureEssenceCoding.Value(), 16);
+        out->has_picture_essence_coding = 1;
+    }
+
+    // RGBALayout keeps its bytes private, so archive them out.
+    Kumu::MemIOWriter layout_writer(out->pixel_layout, sizeof(out->pixel_layout));
+    if (!ed->PixelLayout.Archive(&layout_writer)) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    if (!ed->ComponentMaxRef.empty()) {
+        out->component_max_ref = ed->ComponentMaxRef.const_get();
+        out->has_component_max_ref = 1;
+    }
+    if (!ed->ComponentMinRef.empty()) {
+        out->component_min_ref = ed->ComponentMinRef.const_get();
+        out->has_component_min_ref = 1;
+    }
+    return ASDCP::RESULT_OK.Value();
 }
 
 /* Read all HDR/WCG metadata off the AS-02 picture essence descriptor. */

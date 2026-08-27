@@ -25,6 +25,74 @@ typedef struct {
     int32_t denominator;
 } asdcp_rational_t;
 
+/* Mirrors of ASDCP::JP2K::MaxComponents, MaxPrecincts, MaxDefaults and
+   MaxCapabilities. */
+#define ASDCP_JP2K_MAX_COMPONENTS 3
+#define ASDCP_JP2K_MAX_PRECINCT_SIZES 32
+#define ASDCP_JP2K_MAX_QUANTIZATION_STEPS 256
+#define ASDCP_JP2K_MAX_CAPABILITIES 32
+
+/* ASDCP::JP2K::NoExtendedCapabilitiesSignaled: capability_count when the
+   codestream has no CAP marker, which keeps J2KExtendedCapabilities off the
+   sub-descriptor entirely. */
+#define ASDCP_JP2K_NO_EXTENDED_CAPABILITIES (-1)
+
+/* One SIZ component (ISO 15444-1 Annex A.5.1). ssize holds the bit depth minus
+   one in its low 7 bits and the signed flag in the top bit. */
+typedef struct {
+    uint8_t ssize;
+    uint8_t x_rsize;
+    uint8_t y_rsize;
+} asdcp_image_component_t;
+
+/* The COD marker segment (ISO 15444-1 Annex A.6.1), flattened from asdcplib's
+   nested SGcod/SPcod structs. number_of_layers is the raw big-endian pair. */
+typedef struct {
+    uint8_t scod;
+    uint8_t progression_order;
+    uint8_t number_of_layers[2];
+    uint8_t multi_component_transform;
+    uint8_t decomposition_levels;
+    uint8_t codeblock_width;
+    uint8_t codeblock_height;
+    uint8_t codeblock_style;
+    uint8_t transformation;
+    uint8_t precinct_sizes[ASDCP_JP2K_MAX_PRECINCT_SIZES];
+} asdcp_coding_style_default_t;
+
+/* The QCD marker segment (ISO 15444-1 Annex A.6.4). */
+typedef struct {
+    uint8_t sqcd;
+    uint8_t spqcd[ASDCP_JP2K_MAX_QUANTIZATION_STEPS];
+    uint8_t spqcd_length;
+} asdcp_quantization_default_t;
+
+/* The CAP marker segment (ISO 15444-1 Annex A.5.2). */
+typedef struct {
+    uint32_t pcap;
+    int8_t capability_count;
+    uint16_t ccap[ASDCP_JP2K_MAX_CAPABILITIES];
+} asdcp_extended_capabilities_t;
+
+/* The JPEG 2000 codestream header values that go into the MXF
+   JPEG2000PictureSubDescriptor. Filled by asdcp_jp2k_parse_codestream_header
+   from a real codestream, never by hand. */
+typedef struct {
+    uint16_t rsize;
+    uint32_t xsize;
+    uint32_t ysize;
+    uint32_t x_osize;
+    uint32_t y_osize;
+    uint32_t xt_size;
+    uint32_t yt_size;
+    uint32_t xt_osize;
+    uint32_t yt_osize;
+    asdcp_image_component_t image_components[ASDCP_JP2K_MAX_COMPONENTS];
+    asdcp_coding_style_default_t coding_style_default;
+    asdcp_quantization_default_t quantization_default;
+    asdcp_extended_capabilities_t extended_capabilities;
+} asdcp_codestream_header_t;
+
 typedef struct {
     asdcp_rational_t edit_rate;
     asdcp_rational_t sample_rate;
@@ -33,7 +101,26 @@ typedef struct {
     asdcp_rational_t aspect_ratio;
     uint32_t container_duration;
     uint16_t csize;
+    asdcp_codestream_header_t codestream;
 } asdcp_picture_descriptor_t;
+
+/* Parse a JPEG 2000 codestream's SIZ, COD and QCD markers into out. Returns
+   RESULT_RAW_ESS or RESULT_RAW_FORMAT if the bytes are not a codestream. */
+asdcp_result_t asdcp_jp2k_parse_codestream_header(const uint8_t* codestream, uint32_t size,
+    asdcp_codestream_header_t* out);
+
+/* The RGBA essence descriptor properties an AS-02 picture track carries beyond
+   the shared picture descriptor. pixel_layout is the SMPTE 377 component code
+   and depth pairs. */
+typedef struct {
+    int32_t has_picture_essence_coding;
+    uint8_t picture_essence_coding[16];
+    uint8_t pixel_layout[16];
+    int32_t has_component_max_ref;
+    uint32_t component_max_ref;
+    int32_t has_component_min_ref;
+    uint32_t component_min_ref;
+} asdcp_rgba_descriptor_t;
 
 typedef struct {
     asdcp_rational_t edit_rate;
@@ -341,6 +428,10 @@ void asdcp_as02_jp2k_reader_free(asdcp_as02_jp2k_reader_t r);
 asdcp_result_t asdcp_as02_jp2k_reader_open_read(asdcp_as02_jp2k_reader_t r, const char* filename);
 asdcp_result_t asdcp_as02_jp2k_reader_close(asdcp_as02_jp2k_reader_t r);
 asdcp_result_t asdcp_as02_jp2k_reader_fill_picture_descriptor(asdcp_as02_jp2k_reader_t r, asdcp_picture_descriptor_t* desc);
+/* Read the RGBA essence descriptor's PictureEssenceCoding, PixelLayout and
+   component reference levels. */
+asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_rgba_descriptor_t* out);
 /* Read all HDR/WCG picture metadata off the AS-02 descriptor. */
 asdcp_result_t asdcp_as02_jp2k_reader_read_hdr(asdcp_as02_jp2k_reader_t r, asdcp_hdr_metadata_t* hdr);
 asdcp_result_t asdcp_as02_jp2k_reader_fill_writer_info(asdcp_as02_jp2k_reader_t r, asdcp_writer_info_t* info);

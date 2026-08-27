@@ -70,6 +70,79 @@ pub struct AsdcpRational {
     pub denominator: i32,
 }
 
+/// Mirrors of `ASDCP::JP2K::MaxComponents`, `MaxPrecincts`, `MaxDefaults` and
+/// `MaxCapabilities`.
+pub const ASDCP_JP2K_MAX_COMPONENTS: usize = 3;
+pub const ASDCP_JP2K_MAX_PRECINCT_SIZES: usize = 32;
+pub const ASDCP_JP2K_MAX_QUANTIZATION_STEPS: usize = 256;
+pub const ASDCP_JP2K_MAX_CAPABILITIES: usize = 32;
+
+/// `ASDCP::JP2K::NoExtendedCapabilitiesSignaled`.
+pub const ASDCP_JP2K_NO_EXTENDED_CAPABILITIES: i8 = -1;
+
+/// One SIZ component.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AsdcpImageComponent {
+    pub ssize: u8,
+    pub x_rsize: u8,
+    pub y_rsize: u8,
+}
+
+/// The COD marker segment.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpCodingStyleDefault {
+    pub scod: u8,
+    pub progression_order: u8,
+    pub number_of_layers: [u8; 2],
+    pub multi_component_transform: u8,
+    pub decomposition_levels: u8,
+    pub codeblock_width: u8,
+    pub codeblock_height: u8,
+    pub codeblock_style: u8,
+    pub transformation: u8,
+    pub precinct_sizes: [u8; ASDCP_JP2K_MAX_PRECINCT_SIZES],
+}
+
+/// The QCD marker segment.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpQuantizationDefault {
+    pub sqcd: u8,
+    pub spqcd: [u8; ASDCP_JP2K_MAX_QUANTIZATION_STEPS],
+    pub spqcd_length: u8,
+}
+
+/// The CAP marker segment.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpExtendedCapabilities {
+    pub pcap: u32,
+    pub capability_count: i8,
+    pub ccap: [u16; ASDCP_JP2K_MAX_CAPABILITIES],
+}
+
+/// JPEG 2000 codestream header values, filled by
+/// [`asdcp_jp2k_parse_codestream_header`].
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpCodestreamHeader {
+    pub rsize: u16,
+    pub xsize: u32,
+    pub ysize: u32,
+    pub x_osize: u32,
+    pub y_osize: u32,
+    pub xt_size: u32,
+    pub yt_size: u32,
+    pub xt_osize: u32,
+    pub yt_osize: u32,
+    pub image_components: [AsdcpImageComponent; ASDCP_JP2K_MAX_COMPONENTS],
+    pub coding_style_default: AsdcpCodingStyleDefault,
+    pub quantization_default: AsdcpQuantizationDefault,
+    pub extended_capabilities: AsdcpExtendedCapabilities,
+}
+
 /// JP2K picture descriptor (C-compatible subset).
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -81,6 +154,20 @@ pub struct AsdcpPictureDescriptor {
     pub aspect_ratio: AsdcpRational,
     pub container_duration: u32,
     pub csize: u16,
+    pub codestream: AsdcpCodestreamHeader,
+}
+
+/// AS-02 RGBA essence descriptor properties.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpRgbaDescriptor {
+    pub has_picture_essence_coding: c_int,
+    pub picture_essence_coding: [u8; 16],
+    pub pixel_layout: [u8; 16],
+    pub has_component_max_ref: c_int,
+    pub component_max_ref: u32,
+    pub has_component_min_ref: c_int,
+    pub component_min_ref: u32,
 }
 
 /// PCM audio descriptor (C-compatible).
@@ -236,6 +323,13 @@ unsafe extern "C" {
         ctx: *mut AsdcpHmacContext,
         key: *const u8,
         label_set: c_int,
+    ) -> AsdcpResult;
+
+    /// Parse a JPEG 2000 codestream's SIZ, COD and QCD markers into `out`.
+    pub fn asdcp_jp2k_parse_codestream_header(
+        codestream: *const u8,
+        size: u32,
+        out: *mut AsdcpCodestreamHeader,
     ) -> AsdcpResult;
 
     // ---- JP2K Writer ----
@@ -588,6 +682,10 @@ unsafe extern "C" {
     pub fn asdcp_as02_jp2k_reader_fill_picture_descriptor(
         r: *mut AsdcpAs02Jp2kReader,
         desc: *mut AsdcpPictureDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_read_rgba_descriptor(
+        r: *mut AsdcpAs02Jp2kReader,
+        out: *mut AsdcpRgbaDescriptor,
     ) -> AsdcpResult;
     pub fn asdcp_as02_jp2k_reader_read_hdr(
         r: *mut AsdcpAs02Jp2kReader,

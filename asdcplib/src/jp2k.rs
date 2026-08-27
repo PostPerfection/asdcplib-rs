@@ -11,6 +11,12 @@ pub const TRANSFER_CHARACTERISTIC_ST2084: [u8; 16] = [
     0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x01, 0x01, 0x01, 0x0a, 0x00, 0x00,
 ];
 
+/// ITU-R BT.709 transfer characteristic UL (MDD.cpp `TransferCharacteristic_ITU709`),
+/// the SDR transfer an IMF App 2E Rec.709 picture signals.
+pub const TRANSFER_CHARACTERISTIC_BT709: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x01, 0x04, 0x01, 0x01, 0x01, 0x01, 0x02, 0x00, 0x00,
+];
+
 /// ITU-R BT.2020 transfer characteristic UL (MDD.cpp `TransferCharacteristic_ITU2020`).
 pub const TRANSFER_CHARACTERISTIC_BT2020: [u8; 16] = [
     0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0e, 0x04, 0x01, 0x01, 0x01, 0x01, 0x09, 0x00, 0x00,
@@ -29,6 +35,54 @@ pub const COLOR_PRIMARIES_BT2020: [u8; 16] = [
 /// P3 D65 color primaries UL (MDD.cpp `ColorPrimaries_P3D65`).
 pub const COLOR_PRIMARIES_P3D65: [u8; 16] = [
     0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x01, 0x01, 0x03, 0x06, 0x00, 0x00,
+];
+
+/// The picture essence coding labels an AS-02 writer picks from the
+/// codestream's Rsize (MDD.cpp `JP2KEssenceCompression_*`). Anything outside
+/// the cinema and IMF profiles falls back to
+/// [`PICTURE_ESSENCE_CODING_BROADCAST_PROFILE_1`].
+pub const PICTURE_ESSENCE_CODING_CINEMA_2K: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x09, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x01, 0x03,
+];
+
+/// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
+pub const PICTURE_ESSENCE_CODING_CINEMA_4K: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x09, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x01, 0x04,
+];
+
+/// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
+pub const PICTURE_ESSENCE_CODING_BROADCAST_PROFILE_1: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x01, 0x11,
+];
+
+/// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
+pub const PICTURE_ESSENCE_CODING_IMF_2K_LOSSY: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x02, 0x00,
+];
+
+/// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
+pub const PICTURE_ESSENCE_CODING_IMF_4K_LOSSY: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x03, 0x00,
+];
+
+/// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
+pub const PICTURE_ESSENCE_CODING_IMF_8K_LOSSY: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x04, 0x00,
+];
+
+/// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
+pub const PICTURE_ESSENCE_CODING_IMF_2K_REVERSIBLE: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x05, 0x00,
+];
+
+/// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
+pub const PICTURE_ESSENCE_CODING_IMF_4K_REVERSIBLE: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x06, 0x00,
+];
+
+/// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
+pub const PICTURE_ESSENCE_CODING_IMF_8K_REVERSIBLE: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x07, 0x00,
 ];
 
 /// HDR/WCG picture metadata (SMPTE ST 2067-21). Every field is optional; only
@@ -91,6 +145,218 @@ impl HdrMetadata {
     }
 }
 
+/// Number of precinct size bytes the COD marker can carry (ISO 15444-1 Annex
+/// A.6.1), and the width of [`CodingStyleDefault::precinct_sizes`].
+pub const MAX_PRECINCT_SIZES: usize = asdcplib_sys::ASDCP_JP2K_MAX_PRECINCT_SIZES;
+
+/// Ssize packs the bit depth minus one in its low 7 bits and the signed flag in
+/// the top bit.
+const SSIZE_DEPTH_MASK: u8 = 0x7f;
+
+/// One image component of the SIZ marker (ISO 15444-1 Annex A.5.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageComponent {
+    /// Bit depth minus one in the low 7 bits, signed flag in the top bit.
+    pub ssize: u8,
+    /// Horizontal separation of the component samples on the reference grid.
+    pub x_rsize: u8,
+    /// Vertical separation of the component samples on the reference grid.
+    pub y_rsize: u8,
+}
+
+impl ImageComponent {
+    pub fn bit_depth(&self) -> u8 {
+        (self.ssize & SSIZE_DEPTH_MASK) + 1
+    }
+
+    pub fn is_signed(&self) -> bool {
+        self.ssize & !SSIZE_DEPTH_MASK != 0
+    }
+}
+
+/// The COD marker segment (ISO 15444-1 Annex A.6.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodingStyleDefault {
+    pub scod: u8,
+    pub progression_order: u8,
+    pub number_of_layers: u16,
+    pub multi_component_transform: u8,
+    pub decomposition_levels: u8,
+    pub codeblock_width: u8,
+    pub codeblock_height: u8,
+    pub codeblock_style: u8,
+    pub transformation: u8,
+    /// Trailing zeros mean the codestream signalled fewer precinct sizes.
+    pub precinct_sizes: [u8; MAX_PRECINCT_SIZES],
+}
+
+/// The QCD marker segment (ISO 15444-1 Annex A.6.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuantizationDefault {
+    pub sqcd: u8,
+    /// Quantization step sizes, as many as the marker carried.
+    pub spqcd: Vec<u8>,
+}
+
+/// The CAP marker segment (ISO 15444-1 Annex A.5.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtendedCapabilities {
+    pub pcap: u32,
+    pub ccap: Vec<u16>,
+}
+
+/// The JPEG 2000 codestream header values the MXF
+/// `JPEG2000PictureSubDescriptor` carries: the SIZ image and tile grid, the
+/// per-component depth and subsampling, and the COD, QCD and CAP marker
+/// segments.
+///
+/// Only [`CodestreamHeader::parse`] builds one, so a picture descriptor cannot
+/// reach the writer with a zeroed sub-descriptor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CodestreamHeader {
+    /// SIZ Rsize: the profile and level the codestream conforms to.
+    pub rsize: u16,
+    /// SIZ Xsize and Ysize: the reference grid size.
+    pub xsize: u32,
+    pub ysize: u32,
+    /// SIZ XOsize and YOsize: the image offset within the reference grid.
+    pub x_osize: u32,
+    pub y_osize: u32,
+    /// SIZ XTsize and YTsize: the tile size.
+    pub xt_size: u32,
+    pub yt_size: u32,
+    /// SIZ XTOsize and YTOsize: the first tile's offset.
+    pub xt_osize: u32,
+    pub yt_osize: u32,
+    pub components: Vec<ImageComponent>,
+    pub coding_style_default: CodingStyleDefault,
+    pub quantization_default: QuantizationDefault,
+    /// `None` when the codestream carries no CAP marker.
+    pub extended_capabilities: Option<ExtendedCapabilities>,
+}
+
+impl CodestreamHeader {
+    /// Read the SIZ, COD, QCD and CAP markers of a JPEG 2000 codestream.
+    pub fn parse(codestream: &[u8]) -> Result<Self> {
+        let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpCodestreamHeader>() };
+        error::check(unsafe {
+            asdcplib_sys::asdcp_jp2k_parse_codestream_header(
+                codestream.as_ptr(),
+                codestream.len() as u32,
+                &mut ffi,
+            )
+        })?;
+        Ok(Self::from_ffi(
+            &ffi,
+            asdcplib_sys::ASDCP_JP2K_MAX_COMPONENTS as u16,
+        ))
+    }
+
+    fn from_ffi(ffi: &asdcplib_sys::AsdcpCodestreamHeader, component_count: u16) -> Self {
+        let components = ffi.image_components
+            [..(component_count as usize).min(asdcplib_sys::ASDCP_JP2K_MAX_COMPONENTS)]
+            .iter()
+            .map(|c| ImageComponent {
+                ssize: c.ssize,
+                x_rsize: c.x_rsize,
+                y_rsize: c.y_rsize,
+            })
+            .collect();
+
+        let cod = &ffi.coding_style_default;
+        let quantization = &ffi.quantization_default;
+        let capabilities = &ffi.extended_capabilities;
+
+        Self {
+            rsize: ffi.rsize,
+            xsize: ffi.xsize,
+            ysize: ffi.ysize,
+            x_osize: ffi.x_osize,
+            y_osize: ffi.y_osize,
+            xt_size: ffi.xt_size,
+            yt_size: ffi.yt_size,
+            xt_osize: ffi.xt_osize,
+            yt_osize: ffi.yt_osize,
+            components,
+            coding_style_default: CodingStyleDefault {
+                scod: cod.scod,
+                progression_order: cod.progression_order,
+                number_of_layers: u16::from_be_bytes(cod.number_of_layers),
+                multi_component_transform: cod.multi_component_transform,
+                decomposition_levels: cod.decomposition_levels,
+                codeblock_width: cod.codeblock_width,
+                codeblock_height: cod.codeblock_height,
+                codeblock_style: cod.codeblock_style,
+                transformation: cod.transformation,
+                precinct_sizes: cod.precinct_sizes,
+            },
+            quantization_default: QuantizationDefault {
+                sqcd: quantization.sqcd,
+                spqcd: quantization.spqcd[..quantization.spqcd_length as usize].to_vec(),
+            },
+            extended_capabilities: (capabilities.capability_count
+                != asdcplib_sys::ASDCP_JP2K_NO_EXTENDED_CAPABILITIES)
+                .then(|| ExtendedCapabilities {
+                    pcap: capabilities.pcap,
+                    ccap: capabilities.ccap[..capabilities.capability_count as usize].to_vec(),
+                }),
+        }
+    }
+
+    fn to_ffi(&self) -> asdcplib_sys::AsdcpCodestreamHeader {
+        let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpCodestreamHeader>() };
+        ffi.rsize = self.rsize;
+        ffi.xsize = self.xsize;
+        ffi.ysize = self.ysize;
+        ffi.x_osize = self.x_osize;
+        ffi.y_osize = self.y_osize;
+        ffi.xt_size = self.xt_size;
+        ffi.yt_size = self.yt_size;
+        ffi.xt_osize = self.xt_osize;
+        ffi.yt_osize = self.yt_osize;
+
+        for (slot, component) in ffi.image_components.iter_mut().zip(&self.components) {
+            slot.ssize = component.ssize;
+            slot.x_rsize = component.x_rsize;
+            slot.y_rsize = component.y_rsize;
+        }
+
+        let cod = &self.coding_style_default;
+        ffi.coding_style_default = asdcplib_sys::AsdcpCodingStyleDefault {
+            scod: cod.scod,
+            progression_order: cod.progression_order,
+            number_of_layers: cod.number_of_layers.to_be_bytes(),
+            multi_component_transform: cod.multi_component_transform,
+            decomposition_levels: cod.decomposition_levels,
+            codeblock_width: cod.codeblock_width,
+            codeblock_height: cod.codeblock_height,
+            codeblock_style: cod.codeblock_style,
+            transformation: cod.transformation,
+            precinct_sizes: cod.precinct_sizes,
+        };
+
+        let spqcd = &self.quantization_default.spqcd;
+        ffi.quantization_default.sqcd = self.quantization_default.sqcd;
+        ffi.quantization_default.spqcd[..spqcd.len()].copy_from_slice(spqcd);
+        ffi.quantization_default.spqcd_length = spqcd.len() as u8;
+
+        match &self.extended_capabilities {
+            Some(capabilities) => {
+                ffi.extended_capabilities.pcap = capabilities.pcap;
+                ffi.extended_capabilities.capability_count = capabilities.ccap.len() as i8;
+                ffi.extended_capabilities.ccap[..capabilities.ccap.len()]
+                    .copy_from_slice(&capabilities.ccap);
+            }
+            None => {
+                ffi.extended_capabilities.capability_count =
+                    asdcplib_sys::ASDCP_JP2K_NO_EXTENDED_CAPABILITIES;
+            }
+        }
+        ffi
+    }
+}
+
 /// JPEG 2000 picture descriptor.
 #[derive(Debug, Clone)]
 pub struct PictureDescriptor {
@@ -101,6 +367,9 @@ pub struct PictureDescriptor {
     pub aspect_ratio: Rational,
     pub container_duration: u32,
     pub component_count: u16,
+    /// Parsed from the essence's first frame, so the MXF sub-descriptor
+    /// describes the codestream that is actually wrapped.
+    pub codestream: CodestreamHeader,
 }
 
 impl PictureDescriptor {
@@ -113,6 +382,7 @@ impl PictureDescriptor {
             aspect_ratio: self.aspect_ratio.to_ffi(),
             container_duration: self.container_duration,
             csize: self.component_count,
+            codestream: self.codestream.to_ffi(),
         }
     }
 
@@ -125,6 +395,7 @@ impl PictureDescriptor {
             aspect_ratio: Rational::from_ffi(&ffi.aspect_ratio),
             container_duration: ffi.container_duration,
             component_count: ffi.csize,
+            codestream: CodestreamHeader::from_ffi(&ffi.codestream, ffi.csize),
         }
     }
 }
