@@ -254,7 +254,7 @@ mod jp2k_tests {
         let desc = descriptor(24 * 60);
         assert_eq!(desc.stored_width, 64);
         assert_eq!(desc.stored_height, 64);
-        assert_eq!(desc.component_count, 3);
+        assert_eq!(desc.codestream.components.len(), 3);
         assert_eq!(desc.codestream.rsize, 0x0003);
     }
 
@@ -268,7 +268,6 @@ mod jp2k_tests {
             stored_height: codestream.ysize,
             aspect_ratio: asdcplib::Rational::new(1, 1),
             container_duration: frames,
-            component_count: codestream.components.len() as u16,
             codestream,
         }
     }
@@ -359,7 +358,6 @@ mod jp2k_tests {
         assert_eq!(read.codestream.rsize, 0x0003);
         assert_eq!(read.codestream.xsize, 64);
         assert_eq!(read.codestream.ysize, 64);
-        assert_eq!(read.component_count, 3);
         assert_eq!(read.codestream.components.len(), 3);
         for component in &read.codestream.components {
             assert_eq!(component.bit_depth(), 12);
@@ -1375,7 +1373,7 @@ mod as02_jp2k_tests {
     use asdcplib::as02::jp2k::*;
     use asdcplib::jp2k::{
         COLOR_PRIMARIES_BT2020, CodestreamHeader, HdrMetadata, PICTURE_ESSENCE_CODING_CINEMA_2K,
-        PICTURE_ESSENCE_CODING_IMF_4K_LOSSY, PictureDescriptor, TRANSFER_CHARACTERISTIC_ST2084,
+        PICTURE_ESSENCE_CODING_IMF_4K_LOSSY_6_3, PictureDescriptor, TRANSFER_CHARACTERISTIC_ST2084,
     };
 
     fn descriptor_for(fixture_name: &str, frames: u32) -> PictureDescriptor {
@@ -1387,7 +1385,6 @@ mod as02_jp2k_tests {
             stored_height: codestream.ysize,
             aspect_ratio: asdcplib::Rational::new(codestream.xsize as i32, codestream.ysize as i32),
             container_duration: frames,
-            component_count: codestream.components.len() as u16,
             codestream,
         }
     }
@@ -1491,7 +1488,6 @@ mod as02_jp2k_tests {
         assert_eq!(read.codestream.rsize, expected_rsize);
         assert_eq!(read.codestream.xsize, expected_size.0);
         assert_eq!(read.codestream.ysize, expected_size.1);
-        assert_eq!(read.component_count, 3);
         assert_eq!(read.codestream.components.len(), 3);
         for component in &read.codestream.components {
             assert_eq!(component.bit_depth(), 12);
@@ -1517,13 +1513,22 @@ mod as02_jp2k_tests {
         std::fs::remove_file(path).unwrap();
     }
 
-    /// An IMF 4K lossy codestream (Rsiz 0x0536) must land as the IMF 4K Lossy
-    /// label, not the Broadcast Profile 1 label the writer used to hardcode.
+    /// An IMF 4K lossy codestream at main level 6 sub level 3 (Rsiz 0x0536) must
+    /// land as that level's label, not the Broadcast Profile 1 label the writer
+    /// used to hardcode. The expected UL is the PictureCompression Netflix's Sol
+    /// Levante App 2E picture carries.
     #[test]
     fn test_as02_jp2k_descriptors_imf_4k() {
+        assert_eq!(
+            PICTURE_ESSENCE_CODING_IMF_4K_LOSSY_6_3,
+            [
+                0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01,
+                0x03, 0x12
+            ]
+        );
         assert_as02_descriptors(
             crate::util::IMF_4K_FIXTURE,
-            PICTURE_ESSENCE_CODING_IMF_4K_LOSSY,
+            PICTURE_ESSENCE_CODING_IMF_4K_LOSSY_6_3,
             0x0536,
             (3840, 2160),
         );

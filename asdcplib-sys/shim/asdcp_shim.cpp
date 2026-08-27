@@ -60,6 +60,7 @@ static void c_to_cpp_codestream_header(const asdcp_codestream_header_t* c,
     cpp.YTsize = c->yt_size;
     cpp.XTOsize = c->xt_osize;
     cpp.YTOsize = c->yt_osize;
+    cpp.Csize = c->csize;
 
     for (uint32_t i = 0; i < ASDCP_JP2K_MAX_COMPONENTS; ++i) {
         cpp.ImageComponents[i].Ssize = c->image_components[i].ssize;
@@ -105,6 +106,7 @@ static void cpp_to_c_codestream_header(const ASDCP::JP2K::PictureDescriptor& cpp
     c->yt_size = cpp.YTsize;
     c->xt_osize = cpp.XTOsize;
     c->yt_osize = cpp.YTOsize;
+    c->csize = cpp.Csize;
 
     for (uint32_t i = 0; i < ASDCP_JP2K_MAX_COMPONENTS; ++i) {
         c->image_components[i].ssize = cpp.ImageComponents[i].Ssize;
@@ -161,7 +163,6 @@ static void c_to_cpp_picture_desc(const asdcp_picture_descriptor_t* c, ASDCP::JP
     cpp.StoredHeight = c->stored_height;
     cpp.AspectRatio = ASDCP::Rational(c->aspect_ratio.numerator, c->aspect_ratio.denominator);
     cpp.ContainerDuration = c->container_duration;
-    cpp.Csize = c->csize;
     c_to_cpp_codestream_header(&c->codestream, cpp);
 }
 
@@ -176,7 +177,6 @@ static void cpp_to_c_picture_desc(const ASDCP::JP2K::PictureDescriptor& cpp, asd
     c->aspect_ratio.numerator = cpp.AspectRatio.Numerator;
     c->aspect_ratio.denominator = cpp.AspectRatio.Denominator;
     c->container_duration = cpp.ContainerDuration;
-    c->csize = cpp.Csize;
 }
 
 static void c_to_cpp_audio_desc(const asdcp_audio_descriptor_t* c, ASDCP::PCM::AudioDescriptor& cpp) {
@@ -1205,9 +1205,82 @@ static const uint16_t RSIZ_IMF_FAMILY_8K = 0x0600;
    the top bit. */
 static const uint8_t SSIZE_DEPTH_MASK = 0x7f;
 
-/* The PictureEssenceCoding label a codestream's Rsiz calls for. Profiles
-   asdcplib has no label for fall back to Broadcast Profile 1, which is what
-   as-02-wrap writes when no label is given on the command line. */
+static const uint16_t RSIZ_IMF_MAIN_LEVEL_MASK = 0x000f;
+static const uint16_t RSIZ_IMF_SUB_LEVEL_SHIFT = 4;
+
+/* Every level-specific IMF picture essence coding label MDD.cpp names, keyed by
+   the profile family, main level and sub level its Rsiz encodes. Sub level 0 is
+   a reversible profile. */
+struct imf_essence_coding_entry {
+    uint16_t family;
+    uint8_t main_level;
+    uint8_t sub_level;
+    ASDCP::MDD_t label;
+};
+
+static const imf_essence_coding_entry IMF_ESSENCE_CODINGS[] = {
+    { RSIZ_IMF_FAMILY_2K,  1, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_1_1 },
+    { RSIZ_IMF_FAMILY_2K,  2, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_2_1 },
+    { RSIZ_IMF_FAMILY_2K,  3, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_3_1 },
+    { RSIZ_IMF_FAMILY_2K,  4, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_4_1 },
+    { RSIZ_IMF_FAMILY_2K,  4, 2, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_4_2 },
+    { RSIZ_IMF_FAMILY_2K,  5, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_5_1 },
+    { RSIZ_IMF_FAMILY_2K,  5, 2, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_5_2 },
+    { RSIZ_IMF_FAMILY_2K,  5, 3, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_5_3 },
+    { RSIZ_IMF_FAMILY_2K,  6, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_6_1 },
+    { RSIZ_IMF_FAMILY_2K,  6, 2, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_6_2 },
+    { RSIZ_IMF_FAMILY_2K,  6, 3, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_6_3 },
+    { RSIZ_IMF_FAMILY_2K,  6, 4, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy_6_4 },
+    { RSIZ_IMF_FAMILY_4K,  1, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_1_1 },
+    { RSIZ_IMF_FAMILY_4K,  2, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_2_1 },
+    { RSIZ_IMF_FAMILY_4K,  3, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_3_1 },
+    { RSIZ_IMF_FAMILY_4K,  4, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_4_1 },
+    { RSIZ_IMF_FAMILY_4K,  4, 2, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_4_2 },
+    { RSIZ_IMF_FAMILY_4K,  5, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_5_1 },
+    { RSIZ_IMF_FAMILY_4K,  5, 2, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_5_2 },
+    { RSIZ_IMF_FAMILY_4K,  5, 3, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_5_3 },
+    { RSIZ_IMF_FAMILY_4K,  6, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_6_1 },
+    { RSIZ_IMF_FAMILY_4K,  6, 2, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_6_2 },
+    { RSIZ_IMF_FAMILY_4K,  6, 3, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_6_3 },
+    { RSIZ_IMF_FAMILY_4K,  6, 4, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_6_4 },
+    { RSIZ_IMF_FAMILY_4K,  7, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_7_1 },
+    { RSIZ_IMF_FAMILY_4K,  7, 2, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_7_2 },
+    { RSIZ_IMF_FAMILY_4K,  7, 3, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_7_3 },
+    { RSIZ_IMF_FAMILY_4K,  7, 4, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_7_4 },
+    { RSIZ_IMF_FAMILY_4K,  7, 5, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_7_5 },
+    { RSIZ_IMF_FAMILY_4K,  8, 1, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_8_1 },
+    { RSIZ_IMF_FAMILY_4K,  8, 2, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_8_2 },
+    { RSIZ_IMF_FAMILY_4K,  8, 3, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_8_3 },
+    { RSIZ_IMF_FAMILY_4K,  8, 4, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_8_4 },
+    { RSIZ_IMF_FAMILY_4K,  8, 5, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_8_5 },
+    { RSIZ_IMF_FAMILY_4K,  8, 6, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Lossy_8_6 },
+    { RSIZ_IMF_FAMILY_2K,  1, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Reversible_1_0 },
+    { RSIZ_IMF_FAMILY_2K,  2, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Reversible_2_0 },
+    { RSIZ_IMF_FAMILY_2K,  3, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Reversible_3_0 },
+    { RSIZ_IMF_FAMILY_2K,  4, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Reversible_4_0 },
+    { RSIZ_IMF_FAMILY_2K,  5, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Reversible_5_0 },
+    { RSIZ_IMF_FAMILY_2K,  6, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Reversible_6_0 },
+    { RSIZ_IMF_FAMILY_4K,  1, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible_1_0 },
+    { RSIZ_IMF_FAMILY_4K,  2, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible_2_0 },
+    { RSIZ_IMF_FAMILY_4K,  3, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible_3_0 },
+    { RSIZ_IMF_FAMILY_4K,  4, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible_4_0 },
+    { RSIZ_IMF_FAMILY_4K,  5, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible_5_0 },
+    { RSIZ_IMF_FAMILY_4K,  6, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible_6_0 },
+    { RSIZ_IMF_FAMILY_4K,  7, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible_7_0 },
+    { RSIZ_IMF_FAMILY_4K,  8, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_4K_Reversible_8_0 },
+    { RSIZ_IMF_FAMILY_8K,  1, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_1_0 },
+    { RSIZ_IMF_FAMILY_8K,  2, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_2_0 },
+    { RSIZ_IMF_FAMILY_8K,  3, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_3_0 },
+    { RSIZ_IMF_FAMILY_8K,  4, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_4_0 },
+    { RSIZ_IMF_FAMILY_8K,  5, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_5_0 },
+    { RSIZ_IMF_FAMILY_8K,  6, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_6_0 },
+    { RSIZ_IMF_FAMILY_8K,  7, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_7_0 },
+    { RSIZ_IMF_FAMILY_8K,  8, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_8_0 },
+    { RSIZ_IMF_FAMILY_8K,  9, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_9_0 },
+    { RSIZ_IMF_FAMILY_8K, 10, 0, ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible_10_0 },
+};
+
+/* The PictureEssenceCoding label a codestream's Rsiz calls for. */
 static ASDCP::MDD_t essence_coding_for_rsize(uint16_t rsize) {
     const uint16_t profile = rsize & RSIZ_PROFILE_MASK;
     if (profile == RSIZ_PROFILE_CINEMA_2K) {
@@ -1217,8 +1290,24 @@ static ASDCP::MDD_t essence_coding_for_rsize(uint16_t rsize) {
         return ASDCP::MDD_JP2KEssenceCompression_4K;
     }
 
-    const bool reversible = (profile & RSIZ_IMF_SUB_LEVEL_MASK) == 0;
-    switch (profile & RSIZ_IMF_FAMILY_MASK) {
+    const uint16_t family = profile & RSIZ_IMF_FAMILY_MASK;
+    const uint8_t main_level = profile & RSIZ_IMF_MAIN_LEVEL_MASK;
+    const uint8_t sub_level =
+        (profile & RSIZ_IMF_SUB_LEVEL_MASK) >> RSIZ_IMF_SUB_LEVEL_SHIFT;
+
+    const size_t entry_count = sizeof(IMF_ESSENCE_CODINGS) / sizeof(IMF_ESSENCE_CODINGS[0]);
+    for (size_t i = 0; i < entry_count; ++i) {
+        const imf_essence_coding_entry& entry = IMF_ESSENCE_CODINGS[i];
+        if (entry.family == family && entry.main_level == main_level &&
+            entry.sub_level == sub_level) {
+            return entry.label;
+        }
+    }
+
+    /* MDD names no label for this level pair, 8K lossy having none at all, so
+       signal the profile family without the level. */
+    const bool reversible = sub_level == 0;
+    switch (family) {
         case RSIZ_IMF_FAMILY_2K:
             return reversible ? ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Reversible
                               : ASDCP::MDD_JP2KEssenceCompression_IMFProfile_2K_Lossy;
@@ -1229,6 +1318,7 @@ static ASDCP::MDD_t essence_coding_for_rsize(uint16_t rsize) {
             return reversible ? ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Reversible
                               : ASDCP::MDD_JP2KEssenceCompression_IMFProfile_8K_Lossy;
         default:
+            /* not an IMF profile at all: as-02-wrap's own default label */
             return ASDCP::MDD_JP2KEssenceCompression_BroadcastProfile_1;
     }
 }

@@ -38,9 +38,10 @@ pub const COLOR_PRIMARIES_P3D65: [u8; 16] = [
 ];
 
 /// The picture essence coding labels an AS-02 writer picks from the
-/// codestream's Rsize (MDD.cpp `JP2KEssenceCompression_*`). Anything outside
-/// the cinema and IMF profiles falls back to
-/// [`PICTURE_ESSENCE_CODING_BROADCAST_PROFILE_1`].
+/// codestream's Rsize (MDD.cpp `JP2KEssenceCompression_*`). An IMF profile gets
+/// the label for its main and sub level where MDD names one, otherwise the
+/// generic label for its family below. Anything outside the cinema and IMF
+/// profiles falls back to [`PICTURE_ESSENCE_CODING_BROADCAST_PROFILE_1`].
 pub const PICTURE_ESSENCE_CODING_CINEMA_2K: [u8; 16] = [
     0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x09, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x01, 0x03,
 ];
@@ -78,6 +79,12 @@ pub const PICTURE_ESSENCE_CODING_IMF_2K_REVERSIBLE: [u8; 16] = [
 /// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
 pub const PICTURE_ESSENCE_CODING_IMF_4K_REVERSIBLE: [u8; 16] = [
     0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x06, 0x00,
+];
+
+/// IMF 4K lossy, main level 6 sub level 3: what Rsiz 0x0536 maps to, and what
+/// Netflix's Sol Levante App 2E picture carries.
+pub const PICTURE_ESSENCE_CODING_IMF_4K_LOSSY_6_3: [u8; 16] = [
+    0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x03, 0x12,
 ];
 
 /// See [`PICTURE_ESSENCE_CODING_CINEMA_2K`].
@@ -247,15 +254,12 @@ impl CodestreamHeader {
                 &mut ffi,
             )
         })?;
-        Ok(Self::from_ffi(
-            &ffi,
-            asdcplib_sys::ASDCP_JP2K_MAX_COMPONENTS as u16,
-        ))
+        Ok(Self::from_ffi(&ffi))
     }
 
-    fn from_ffi(ffi: &asdcplib_sys::AsdcpCodestreamHeader, component_count: u16) -> Self {
+    fn from_ffi(ffi: &asdcplib_sys::AsdcpCodestreamHeader) -> Self {
         let components = ffi.image_components
-            [..(component_count as usize).min(asdcplib_sys::ASDCP_JP2K_MAX_COMPONENTS)]
+            [..(ffi.csize as usize).min(asdcplib_sys::ASDCP_JP2K_MAX_COMPONENTS)]
             .iter()
             .map(|c| ImageComponent {
                 ssize: c.ssize,
@@ -315,6 +319,7 @@ impl CodestreamHeader {
         ffi.yt_size = self.yt_size;
         ffi.xt_osize = self.xt_osize;
         ffi.yt_osize = self.yt_osize;
+        ffi.csize = self.components.len() as u16;
 
         for (slot, component) in ffi.image_components.iter_mut().zip(&self.components) {
             slot.ssize = component.ssize;
@@ -366,7 +371,6 @@ pub struct PictureDescriptor {
     pub stored_height: u32,
     pub aspect_ratio: Rational,
     pub container_duration: u32,
-    pub component_count: u16,
     /// Parsed from the essence's first frame, so the MXF sub-descriptor
     /// describes the codestream that is actually wrapped.
     pub codestream: CodestreamHeader,
@@ -381,7 +385,6 @@ impl PictureDescriptor {
             stored_height: self.stored_height,
             aspect_ratio: self.aspect_ratio.to_ffi(),
             container_duration: self.container_duration,
-            csize: self.component_count,
             codestream: self.codestream.to_ffi(),
         }
     }
@@ -394,8 +397,7 @@ impl PictureDescriptor {
             stored_height: ffi.stored_height,
             aspect_ratio: Rational::from_ffi(&ffi.aspect_ratio),
             container_duration: ffi.container_duration,
-            component_count: ffi.csize,
-            codestream: CodestreamHeader::from_ffi(&ffi.codestream, ffi.csize),
+            codestream: CodestreamHeader::from_ffi(&ffi.codestream),
         }
     }
 }

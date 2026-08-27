@@ -137,6 +137,7 @@ pub struct AsdcpCodestreamHeader {
     pub yt_size: u32,
     pub xt_osize: u32,
     pub yt_osize: u32,
+    pub csize: u16,
     pub image_components: [AsdcpImageComponent; ASDCP_JP2K_MAX_COMPONENTS],
     pub coding_style_default: AsdcpCodingStyleDefault,
     pub quantization_default: AsdcpQuantizationDefault,
@@ -153,7 +154,6 @@ pub struct AsdcpPictureDescriptor {
     pub stored_height: u32,
     pub aspect_ratio: AsdcpRational,
     pub container_duration: u32,
-    pub csize: u16,
     pub codestream: AsdcpCodestreamHeader,
 }
 

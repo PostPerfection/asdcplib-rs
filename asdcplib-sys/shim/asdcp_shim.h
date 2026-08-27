@@ -87,6 +87,7 @@ typedef struct {
     uint32_t yt_size;
     uint32_t xt_osize;
     uint32_t yt_osize;
+    uint16_t csize;
     asdcp_image_component_t image_components[ASDCP_JP2K_MAX_COMPONENTS];
     asdcp_coding_style_default_t coding_style_default;
     asdcp_quantization_default_t quantization_default;
@@ -100,7 +101,6 @@ typedef struct {
     uint32_t stored_height;
     asdcp_rational_t aspect_ratio;
     uint32_t container_duration;
-    uint16_t csize;
     asdcp_codestream_header_t codestream;
 } asdcp_picture_descriptor_t;
 
