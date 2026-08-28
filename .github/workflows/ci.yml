@@ -70,11 +70,37 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install cargo-llvm-cov (Ubuntu)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Install llvm-tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: rustup component add llvm-tools-preview
+
       - name: Build
         run: cargo build --all-targets
 
+      - name: Test with coverage (Ubuntu)
+        if: runner.os == 'Linux'
+        run: cargo llvm-cov --lcov --output-path lcov.info
+
       - name: Test
+        if: runner.os != 'Linux'
         run: cargo test
+
+      - name: Coverage summary (Ubuntu)
+        if: runner.os == 'Linux'
+        run: cargo llvm-cov report --summary-only | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage (Ubuntu)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
