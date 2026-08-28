@@ -1323,6 +1323,11 @@ static ASDCP::MDD_t essence_coding_for_rsize(uint16_t rsize) {
     }
 }
 
+void asdcp_jp2k_picture_essence_coding_for_rsize(uint16_t rsize, uint8_t* out_ul) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+    memcpy(out_ul, dict->ul(essence_coding_for_rsize(rsize)), ASDCP::SMPTE_UL_LENGTH);
+}
+
 static const byte_t* rgb_pixel_layout_for_depth(uint8_t depth) {
     switch (depth) {
         case 8:  return ASDCP::MXF::RGBAValue_RGB_8;

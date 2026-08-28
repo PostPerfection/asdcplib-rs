@@ -92,6 +92,17 @@ pub const PICTURE_ESSENCE_CODING_IMF_8K_REVERSIBLE: [u8; 16] = [
     0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x01, 0x07, 0x00,
 ];
 
+/// The PictureEssenceCoding label the AS-02 writer sets for a codestream
+/// declaring this Rsiz: the cinema label for a cinema profile, the IMF label
+/// for the profile family and level pair where MDD names one, otherwise the
+/// family's generic label, and
+/// [`PICTURE_ESSENCE_CODING_BROADCAST_PROFILE_1`] for anything else.
+pub fn picture_essence_coding_for_rsize(rsize: u16) -> [u8; 16] {
+    let mut label = [0u8; 16];
+    unsafe { asdcplib_sys::asdcp_jp2k_picture_essence_coding_for_rsize(rsize, label.as_mut_ptr()) };
+    label
+}
+
 /// HDR/WCG picture metadata (SMPTE ST 2067-21). Every field is optional; only
 /// those set are written. Chromaticity coordinates are raw ST 2086 u16 values
 /// (0.00002 increments), luminance raw u32 (0.0001 cd/m^2 increments).

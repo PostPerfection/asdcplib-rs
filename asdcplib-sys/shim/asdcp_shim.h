@@ -109,6 +109,10 @@ typedef struct {
 asdcp_result_t asdcp_jp2k_parse_codestream_header(const uint8_t* codestream, uint32_t size,
     asdcp_codestream_header_t* out);
 
+/* Write into out_ul the 16-byte PictureEssenceCoding label the AS-02 writer
+   would set for this Rsiz. */
+void asdcp_jp2k_picture_essence_coding_for_rsize(uint16_t rsize, uint8_t* out_ul);
+
 /* The RGBA essence descriptor properties an AS-02 picture track carries beyond
    the shared picture descriptor. pixel_layout is the SMPTE 377 component code
    and depth pairs. */

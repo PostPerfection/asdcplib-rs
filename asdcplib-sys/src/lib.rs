@@ -332,6 +332,9 @@ unsafe extern "C" {
         out: *mut AsdcpCodestreamHeader,
     ) -> AsdcpResult;
 
+    /// Write into `out_ul` the 16-byte PictureEssenceCoding label the AS-02 writer would set for this Rsiz.
+    pub fn asdcp_jp2k_picture_essence_coding_for_rsize(rsize: u16, out_ul: *mut u8);
+
     // ---- JP2K Writer ----
     pub fn asdcp_jp2k_writer_new() -> *mut AsdcpJp2kWriter;
     pub fn asdcp_jp2k_writer_free(w: *mut AsdcpJp2kWriter);

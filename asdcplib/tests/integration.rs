@@ -154,6 +154,79 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn picture_essence_coding_follows_the_rsize() {
+        use asdcplib::jp2k::{
+            CodestreamHeader, PICTURE_ESSENCE_CODING_BROADCAST_PROFILE_1,
+            PICTURE_ESSENCE_CODING_CINEMA_2K, PICTURE_ESSENCE_CODING_CINEMA_4K,
+            PICTURE_ESSENCE_CODING_IMF_2K_LOSSY, PICTURE_ESSENCE_CODING_IMF_4K_LOSSY_6_3,
+            PICTURE_ESSENCE_CODING_IMF_8K_LOSSY, PictureDescriptor,
+            picture_essence_coding_for_rsize,
+        };
+
+        assert_eq!(
+            picture_essence_coding_for_rsize(0x0536),
+            PICTURE_ESSENCE_CODING_IMF_4K_LOSSY_6_3
+        );
+        assert_eq!(
+            picture_essence_coding_for_rsize(0x0003),
+            PICTURE_ESSENCE_CODING_CINEMA_2K
+        );
+        assert_eq!(
+            picture_essence_coding_for_rsize(0x0004),
+            PICTURE_ESSENCE_CODING_CINEMA_4K
+        );
+        assert_eq!(
+            picture_essence_coding_for_rsize(0x0417),
+            PICTURE_ESSENCE_CODING_IMF_2K_LOSSY
+        );
+        assert_eq!(
+            picture_essence_coding_for_rsize(0x0611),
+            PICTURE_ESSENCE_CODING_IMF_8K_LOSSY
+        );
+        assert_eq!(
+            picture_essence_coding_for_rsize(0x0000),
+            PICTURE_ESSENCE_CODING_BROADCAST_PROFILE_1
+        );
+
+        let frame = crate::util::fixture(crate::util::IMF_4K_FIXTURE);
+        let codestream = CodestreamHeader::parse(&frame).unwrap();
+        let descriptor = PictureDescriptor {
+            edit_rate: EDIT_RATE_24,
+            sample_rate: EDIT_RATE_24,
+            stored_width: codestream.xsize,
+            stored_height: codestream.ysize,
+            aspect_ratio: Rational::new(codestream.xsize as i32, codestream.ysize as i32),
+            container_duration: 1,
+            codestream,
+        };
+
+        let path = crate::util::temp_path("picture-essence-coding-for-rsize");
+        let path_string = path.to_string_lossy().to_string();
+        let info = WriterInfo::default();
+
+        {
+            let mut writer = as02::jp2k::MxfWriter::new();
+            writer
+                .open_write(&path_string, &info, &descriptor, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = as02::jp2k::MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        assert_eq!(
+            reader.rgba_descriptor().unwrap().picture_essence_coding,
+            Some(picture_essence_coding_for_rsize(
+                descriptor.codestream.rsize
+            ))
+        );
+        reader.close().unwrap();
+
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 #[cfg(test)]
