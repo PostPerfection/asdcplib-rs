@@ -11,6 +11,10 @@ Safe Rust bindings for asdcplib (SMPTE AS-DCP / AS-02 MXF).
 
 - AS-DCP writers/readers: JP2K (mono + stereo), PCM, timed text, Atmos.
 - AS-02 (IMF) writers/readers: JP2K, PCM (plain or with ST 377-4 MCA labels and the IMF MCA ChannelAssignment UL), timed text.
+
+## AS-02 audio labels
+
+`as02::pcm::MxfWriter::open_write_mca` takes an as-02-wrap style config string plus a `SoundfieldGroupProperties`. asdcplib's `AS02_MCAConfigParser` builds the label subdescriptors from the config, and the shim then sets `RFC5646SpokenLanguage`, `MCATitle`, `MCATitleVersion`, `MCAAudioContentKind` and `MCAAudioElementKind` on the one SoundfieldGroupLabelSubDescriptor the config produced, which is what ST 2067-2 section 5.3.6.5 requires and what Photon's `IMFConstraints.checkIMFCompliance` tests for non-emptiness. It tests presence only: the four are free text and Photon compares them against no registry, so the crate ships no value table. A config naming no soundfield group, or more than one, is refused, as is an empty property.
 - Crypto contexts (AES encryption, HMAC) plumbed through writer/reader options, with an encrypted JP2K roundtrip test.
 - `essence_type` probe and library version.
 
@@ -28,4 +32,4 @@ The AS-DCP writer sets its own `PictureEssenceCoding` and forces Rsize to 3 or 4
 
 ## Testing
 
-61 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.
+64 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.
