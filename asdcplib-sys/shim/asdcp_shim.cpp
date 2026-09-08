@@ -792,6 +792,7 @@ static asdcp_result_t fill_mca_label(const std::list<ASDCP::MXF::InterchangeObje
         dynamic_cast<ASDCP::MXF::MCALabelSubDescriptor*>(*li);
 
     memset(out_label, 0, sizeof(*out_label));
+    memcpy(out_label->instance_id, (*li)->InstanceUID.Value(), ASDCP::UUIDlen);
     out_label->kind = mca_label_kind(*li);
     copy_mca_string(label->MCATagSymbol, out_label->tag_symbol);
     memcpy(out_label->label_dictionary_id, label->MCALabelDictionaryID.Value(), 16);
@@ -2008,17 +2009,81 @@ asdcp_result_t asdcp_as02_pcm_reader_read_frame(asdcp_as02_pcm_reader_t r, uint3
     return result.Value();
 }
 
-asdcp_result_t asdcp_as02_pcm_reader_read_channel_assignment(asdcp_as02_pcm_reader_t r,
-    uint8_t* out_ul, int32_t* present) {
+static ASDCP::MXF::WaveAudioDescriptor* as02_wave_audio_descriptor(asdcp_as02_pcm_reader_t r) {
     AS_02::PCM::MXFReader* reader = static_cast<AS_02::PCM::MXFReader*>(r);
     ASDCP::MXF::InterchangeObject* obj = 0;
     reader->OP1aHeader().GetMDObjectByType(
         ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_WaveAudioDescriptor), &obj);
-    ASDCP::MXF::WaveAudioDescriptor* wd = dynamic_cast<ASDCP::MXF::WaveAudioDescriptor*>(obj);
+    return dynamic_cast<ASDCP::MXF::WaveAudioDescriptor*>(obj);
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_read_channel_assignment(asdcp_as02_pcm_reader_t r,
+    uint8_t* out_ul, int32_t* present) {
+    ASDCP::MXF::WaveAudioDescriptor* wd = as02_wave_audio_descriptor(r);
     if (wd == 0) {
         return ASDCP::RESULT_FORMAT.Value();
     }
     copy_optional_ul(wd->ChannelAssignment, present, out_ul);
+    return ASDCP::RESULT_OK.Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_read_wave_audio_descriptor(asdcp_as02_pcm_reader_t r,
+    asdcp_wave_audio_descriptor_t* out) {
+    ASDCP::MXF::WaveAudioDescriptor* ed = as02_wave_audio_descriptor(r);
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    if (ed->Locators.size() > ASDCP_MAX_LOCATORS ||
+        ed->SubDescriptors.size() > ASDCP_MAX_SOUND_SUB_DESCRIPTORS) {
+        return ASDCP::RESULT_RANGE.Value();
+    }
+
+    memset(out, 0, sizeof(*out));
+    memcpy(out->instance_id, ed->InstanceUID.Value(), ASDCP::UUIDlen);
+    out->has_generation_id = ed->GenerationUID.empty() ? 0 : 1;
+    if (!ed->GenerationUID.empty()) {
+        memcpy(out->generation_id, ed->GenerationUID.const_get().Value(), ASDCP::UUIDlen);
+    }
+
+    for (size_t k = 0; k < ed->Locators.size(); ++k) {
+        memcpy(out->locators[k], ed->Locators[k].Value(), ASDCP::UUIDlen);
+        out->locator_count++;
+    }
+    for (size_t k = 0; k < ed->SubDescriptors.size(); ++k) {
+        memcpy(out->sub_descriptors[k], ed->SubDescriptors[k].Value(), ASDCP::UUIDlen);
+        out->sub_descriptor_count++;
+    }
+
+    copy_optional_number(ed->LinkedTrackID, &out->has_linked_track_id, &out->linked_track_id);
+    out->sample_rate.numerator = ed->SampleRate.Numerator;
+    out->sample_rate.denominator = ed->SampleRate.Denominator;
+    copy_optional_number(ed->ContainerDuration, &out->has_container_duration, &out->container_duration);
+    memcpy(out->essence_container, ed->EssenceContainer.Value(), ASDCP::SMPTE_UL_LENGTH);
+    copy_optional_ul(ed->Codec, &out->has_codec, out->codec);
+
+    out->audio_sampling_rate.numerator = ed->AudioSamplingRate.Numerator;
+    out->audio_sampling_rate.denominator = ed->AudioSamplingRate.Denominator;
+    out->locked = ed->Locked == 0 ? 0 : 1;
+    copy_optional_number(ed->AudioRefLevel, &out->has_audio_ref_level, &out->audio_ref_level);
+    copy_optional_number(ed->ElectroSpatialFormulation,
+        &out->has_electro_spatial_formulation, &out->electro_spatial_formulation);
+    out->channel_count = ed->ChannelCount;
+    out->quantization_bits = ed->QuantizationBits;
+    copy_optional_number(ed->DialNorm, &out->has_dial_norm, &out->dial_norm);
+    memcpy(out->sound_essence_coding, ed->SoundEssenceCoding.Value(), ASDCP::SMPTE_UL_LENGTH);
+    copy_optional_number(ed->ReferenceAudioAlignmentLevel,
+        &out->has_reference_audio_alignment_level, &out->reference_audio_alignment_level);
+    out->has_reference_image_edit_rate = ed->ReferenceImageEditRate.empty() ? 0 : 1;
+    if (!ed->ReferenceImageEditRate.empty()) {
+        out->reference_image_edit_rate.numerator = ed->ReferenceImageEditRate.const_get().Numerator;
+        out->reference_image_edit_rate.denominator =
+            ed->ReferenceImageEditRate.const_get().Denominator;
+    }
+
+    out->block_align = ed->BlockAlign;
+    copy_optional_number(ed->SequenceOffset, &out->has_sequence_offset, &out->sequence_offset);
+    out->avg_bps = ed->AvgBps;
+    copy_optional_ul(ed->ChannelAssignment, &out->has_channel_assignment, out->channel_assignment);
     return ASDCP::RESULT_OK.Value();
 }
 

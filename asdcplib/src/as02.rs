@@ -482,6 +482,91 @@ pub mod pcm {
         0x00,
     ];
 
+    /// Every item of the MXF `WaveAudioDescriptor` an AS-02 PCM sound track
+    /// carries, including the ones its `FileDescriptor` and
+    /// `GenericSoundEssenceDescriptor` bases define. An IMF CPL
+    /// EssenceDescriptorList entry has to repeat all of them.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct WaveAudioDescriptor {
+        pub instance_id: [u8; 16],
+        pub generation_id: Option<[u8; 16]>,
+        pub locators: Vec<[u8; 16]>,
+        /// InstanceIDs of the sub-descriptors, the MCA labels among them, in the
+        /// order the descriptor links them.
+        pub sub_descriptors: Vec<[u8; 16]>,
+        pub linked_track_id: Option<u32>,
+        /// SampleRate, which the AS-02 writer sets to the audio sampling rate
+        /// rather than the edit rate, since PCM is clip-wrapped.
+        pub sample_rate: Rational,
+        /// ContainerDuration, which a CPL repeats as EssenceLength. Counted in
+        /// samples, again because PCM is clip-wrapped.
+        pub container_duration: Option<u64>,
+        /// EssenceContainer, which a CPL repeats as ContainerFormat.
+        pub essence_container: [u8; 16],
+        pub codec: Option<[u8; 16]>,
+        pub audio_sampling_rate: Rational,
+        pub locked: bool,
+        pub audio_ref_level: Option<u8>,
+        pub electro_spatial_formulation: Option<u8>,
+        pub channel_count: u32,
+        pub quantization_bits: u32,
+        pub dial_norm: Option<u8>,
+        /// SoundEssenceCoding, nil on a file this crate wrote since asdcplib
+        /// never sets it.
+        pub sound_essence_coding: [u8; 16],
+        pub reference_audio_alignment_level: Option<u8>,
+        pub reference_image_edit_rate: Option<Rational>,
+        pub block_align: u16,
+        pub sequence_offset: Option<u8>,
+        pub avg_bps: u32,
+        /// ChannelAssignment, [`IMF_CHANNEL_ASSIGNMENT_MCA`] on an IMF track
+        /// described by MCA labels.
+        pub channel_assignment: Option<[u8; 16]>,
+    }
+
+    impl WaveAudioDescriptor {
+        fn from_ffi(ffi: &asdcplib_sys::AsdcpWaveAudioDescriptor) -> Self {
+            Self {
+                instance_id: ffi.instance_id,
+                generation_id: optional(ffi.has_generation_id, ffi.generation_id),
+                locators: ffi.locators[..ffi.locator_count as usize].to_vec(),
+                sub_descriptors: ffi.sub_descriptors[..ffi.sub_descriptor_count as usize].to_vec(),
+                linked_track_id: optional(ffi.has_linked_track_id, ffi.linked_track_id),
+                sample_rate: Rational::from_ffi(&ffi.sample_rate),
+                container_duration: optional(ffi.has_container_duration, ffi.container_duration),
+                essence_container: ffi.essence_container,
+                codec: optional(ffi.has_codec, ffi.codec),
+                audio_sampling_rate: Rational::from_ffi(&ffi.audio_sampling_rate),
+                locked: ffi.locked != 0,
+                audio_ref_level: optional(ffi.has_audio_ref_level, ffi.audio_ref_level),
+                electro_spatial_formulation: optional(
+                    ffi.has_electro_spatial_formulation,
+                    ffi.electro_spatial_formulation,
+                ),
+                channel_count: ffi.channel_count,
+                quantization_bits: ffi.quantization_bits,
+                dial_norm: optional(ffi.has_dial_norm, ffi.dial_norm),
+                sound_essence_coding: ffi.sound_essence_coding,
+                reference_audio_alignment_level: optional(
+                    ffi.has_reference_audio_alignment_level,
+                    ffi.reference_audio_alignment_level,
+                ),
+                reference_image_edit_rate: optional(
+                    ffi.has_reference_image_edit_rate,
+                    Rational::from_ffi(&ffi.reference_image_edit_rate),
+                ),
+                block_align: ffi.block_align,
+                sequence_offset: optional(ffi.has_sequence_offset, ffi.sequence_offset),
+                avg_bps: ffi.avg_bps,
+                channel_assignment: optional(ffi.has_channel_assignment, ffi.channel_assignment),
+            }
+        }
+    }
+
+    fn optional<T>(has_value: i32, value: T) -> Option<T> {
+        if has_value != 0 { Some(value) } else { None }
+    }
+
     /// What ST 2067-2 section 5.3.6.5 requires on the one
     /// SoundfieldGroupLabelSubDescriptor of an IMF audio track: the spoken
     /// language plus MCATitle, MCATitleVersion, MCAAudioContentKind and
@@ -720,6 +805,16 @@ pub mod pcm {
                 )
             })?;
             Ok((present != 0).then_some(ul))
+        }
+
+        /// Every item of the WaveAudioDescriptor, enough to repeat it in an IMF
+        /// CPL EssenceDescriptorList.
+        pub fn wave_audio_descriptor(&mut self) -> Result<WaveAudioDescriptor> {
+            let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpWaveAudioDescriptor>() };
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_pcm_reader_read_wave_audio_descriptor(self.ptr, &mut ffi)
+            })?;
+            Ok(WaveAudioDescriptor::from_ffi(&ffi))
         }
 
         /// Every MCA label subdescriptor the WaveAudioDescriptor links, in the

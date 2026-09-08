@@ -376,6 +376,56 @@ pub struct AsdcpJpeg2000SubDescriptor {
     pub corresponding_profile: [u16; ASDCP_JP2K_MAX_PROFILES],
 }
 
+/// Room for the strong references a sound essence descriptor holds.
+pub const ASDCP_MAX_SOUND_SUB_DESCRIPTORS: usize = 72;
+
+/// Every item of `ASDCP::MXF::WaveAudioDescriptor` and its base classes
+/// (C-compatible struct).
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct AsdcpWaveAudioDescriptor {
+    pub instance_id: [u8; 16],
+    pub has_generation_id: c_int,
+    pub generation_id: [u8; 16],
+
+    pub locator_count: u32,
+    pub locators: [[u8; 16]; ASDCP_MAX_LOCATORS],
+    pub sub_descriptor_count: u32,
+    pub sub_descriptors: [[u8; 16]; ASDCP_MAX_SOUND_SUB_DESCRIPTORS],
+
+    pub has_linked_track_id: c_int,
+    pub linked_track_id: u32,
+    pub sample_rate: AsdcpRational,
+    pub has_container_duration: c_int,
+    pub container_duration: u64,
+    pub essence_container: [u8; 16],
+    pub has_codec: c_int,
+    pub codec: [u8; 16],
+
+    pub audio_sampling_rate: AsdcpRational,
+    pub locked: c_int,
+    pub has_audio_ref_level: c_int,
+    pub audio_ref_level: u8,
+    pub has_electro_spatial_formulation: c_int,
+    pub electro_spatial_formulation: u8,
+    pub channel_count: u32,
+    pub quantization_bits: u32,
+    pub has_dial_norm: c_int,
+    pub dial_norm: u8,
+    pub sound_essence_coding: [u8; 16],
+    pub has_reference_audio_alignment_level: c_int,
+    pub reference_audio_alignment_level: u8,
+    pub has_reference_image_edit_rate: c_int,
+    pub reference_image_edit_rate: AsdcpRational,
+
+    pub block_align: u16,
+    pub has_sequence_offset: c_int,
+    pub sequence_offset: u8,
+    pub avg_bps: u32,
+    pub has_channel_assignment: c_int,
+    pub channel_assignment: [u8; 16],
+}
+
 /// Capacity of each string field in [`AsdcpMcaLabel`], including the terminator.
 pub const ASDCP_MCA_STRING_CAPACITY: usize = 129;
 
@@ -383,6 +433,7 @@ pub const ASDCP_MCA_STRING_CAPACITY: usize = 129;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct AsdcpMcaLabel {
+    pub instance_id: [u8; 16],
     pub kind: i32, // 0=AudioChannel, 1=SoundfieldGroup, 2=GroupOfSoundfieldGroups
     pub tag_symbol: [u8; ASDCP_MCA_STRING_CAPACITY],
     pub label_dictionary_id: [u8; 16],
@@ -932,6 +983,10 @@ unsafe extern "C" {
         r: *mut AsdcpAs02PcmReader,
         out_ul: *mut u8,
         present: *mut c_int,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_reader_read_wave_audio_descriptor(
+        r: *mut AsdcpAs02PcmReader,
+        out: *mut AsdcpWaveAudioDescriptor,
     ) -> AsdcpResult;
     pub fn asdcp_as02_pcm_reader_mca_label_count(
         r: *mut AsdcpAs02PcmReader,

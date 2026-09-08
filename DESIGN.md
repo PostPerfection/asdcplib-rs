@@ -30,6 +30,12 @@ Photon reads PixelBitDepth out of the J2CLayout components, so a file without J2
 
 The AS-DCP writer sets its own `PictureEssenceCoding` and forces Rsize to 3 or 4 by stored width, inside asdcplib, so a DCP always signals a cinema profile whatever the codestream says.
 
+## Sound descriptor
+
+`as02::pcm::MxfReader::wave_audio_descriptor` reads back every item of `MXF::WaveAudioDescriptor` and of the `FileDescriptor` and `GenericSoundEssenceDescriptor` it derives from, the InstanceID and the SubDescriptors list included, which is what an IMF CPL EssenceDescriptorList has to repeat verbatim. `pcm::McaLabelSubDescriptor` carries each label's own InstanceID beside its MCALinkID, so the entry can name the same subdescriptors the SubDescriptors list points at. `audio_descriptor` is the older ten-item view of the same read.
+
+Four items come from the writer rather than from the caller's `AudioDescriptor`: `SampleRate` is set to `AudioSamplingRate` and `ContainerDuration` counts samples, both because AS-02 PCM is clip-wrapped, `EssenceContainer` is the ST 382 clip-wrapped WAVE UL, and `LinkedTrackID` is 1, the only track in the file package. `SoundEssenceCoding` is mandatory in ST 377-1 and asdcplib never sets it, so it reads back nil.
+
 ## Testing
 
-64 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.
+65 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.

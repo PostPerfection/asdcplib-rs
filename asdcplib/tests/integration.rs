@@ -2053,6 +2053,88 @@ mod as02_pcm_tests {
         }
     }
 
+    /// The essence container an AS-02 PCM track file carries, ST 382
+    /// clip-wrapped WAVE (asdcplib MDD.cpp `WAVWrappingClip`).
+    const WAV_WRAPPING_CLIP: [u8; 16] = [
+        0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x01, 0x0d, 0x01, 0x03, 0x01, 0x02, 0x06, 0x02,
+        0x00,
+    ];
+
+    /// Every WaveAudioDescriptor item an IMF CPL EssenceDescriptorList has to
+    /// repeat, read back off a two-frame 5.1 MCA file. Photon compares the CPL
+    /// entry against these values verbatim.
+    #[test]
+    fn test_as02_pcm_full_descriptor_roundtrip() {
+        let path = crate::util::temp_path("as02-pcm-full-descriptor");
+        let path_string = path.to_string_lossy().to_string();
+        let written = mca_descriptor(6);
+        // one 24fps frame at 48kHz is 2000 samples
+        let frame = vec![0x5a; (written.block_align * 2_000) as usize];
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_mca(
+                    &path_string,
+                    &WriterInfo::default(),
+                    &written,
+                    "51(L,R,C,LFE,Ls,Rs)",
+                    &SOUNDFIELD_GROUP,
+                    16_384,
+                )
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader
+            .open_read(&path_string, Rational::new(24, 1))
+            .unwrap();
+        let wave = reader.wave_audio_descriptor().unwrap();
+        let labels = reader.mca_label_subdescriptors().unwrap();
+        reader.close().unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_ne!(wave.instance_id, [0u8; 16]);
+        assert_eq!(wave.generation_id, None);
+        assert_eq!(wave.locators, Vec::<[u8; 16]>::new());
+
+        assert_eq!(wave.linked_track_id, Some(1));
+        // clip-wrapped PCM counts SampleRate and ContainerDuration in samples
+        assert_eq!(wave.sample_rate, written.audio_sampling_rate);
+        assert_eq!(wave.container_duration, Some(4_000));
+        assert_eq!(wave.essence_container, WAV_WRAPPING_CLIP);
+        assert_eq!(wave.codec, None);
+
+        assert_eq!(wave.audio_sampling_rate, written.audio_sampling_rate);
+        assert_eq!(wave.locked, written.locked);
+        assert_eq!(wave.channel_count, written.channel_count);
+        assert_eq!(wave.quantization_bits, written.quantization_bits);
+        assert_eq!(wave.block_align, written.block_align as u16);
+        assert_eq!(wave.avg_bps, written.avg_bps);
+        assert_eq!(wave.channel_assignment, Some(IMF_CHANNEL_ASSIGNMENT_MCA));
+        // asdcplib never sets SoundEssenceCoding, so it reads back nil
+        assert_eq!(wave.sound_essence_coding, [0u8; 16]);
+        assert_eq!(wave.audio_ref_level, None);
+        assert_eq!(wave.electro_spatial_formulation, None);
+        assert_eq!(wave.dial_norm, None);
+        assert_eq!(wave.reference_audio_alignment_level, None);
+        assert_eq!(wave.reference_image_edit_rate, None);
+        assert_eq!(wave.sequence_offset, None);
+
+        // a CPL names each subdescriptor by the InstanceID the descriptor links
+        let instance_ids: Vec<[u8; 16]> = labels.iter().map(|label| label.instance_id).collect();
+        assert_eq!(instance_ids.len(), 7);
+        assert_eq!(wave.sub_descriptors, instance_ids);
+        let mut distinct = instance_ids.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), instance_ids.len());
+        assert!(!distinct.contains(&[0u8; 16]));
+    }
+
     /// Photon fails a track file whose soundfield group leaves any of the four
     /// items empty, so all four have to survive the write.
     fn assert_soundfield_group_properties(group: &McaLabelSubDescriptor) {

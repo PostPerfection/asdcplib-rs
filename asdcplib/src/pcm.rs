@@ -307,6 +307,9 @@ pub enum McaLabelKind {
 /// One SMPTE 377-4 MCA label subdescriptor read from a PCM MXF header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McaLabelSubDescriptor {
+    /// InstanceID, which the descriptor's SubDescriptors list repeats and which
+    /// an IMF CPL EssenceDescriptorList entry repeats again.
+    pub instance_id: [u8; 16],
     pub kind: McaLabelKind,
     /// MCATagSymbol, for example `"chVIN"`, `"chHI"`, `"SLVS"` or `"sg51"`.
     pub tag_symbol: String,
@@ -342,6 +345,7 @@ impl McaLabelSubDescriptor {
             _ => return Err(crate::Error::InvalidArgument("unknown mca label kind")),
         };
         Ok(Self {
+            instance_id: ffi.instance_id,
             kind,
             tag_symbol: mca_string(&ffi.tag_symbol)?,
             label_dictionary_id: ffi.label_dictionary_id,

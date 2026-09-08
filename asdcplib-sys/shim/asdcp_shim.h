@@ -327,6 +327,57 @@ typedef struct {
     uint16_t corresponding_profile[ASDCP_JP2K_MAX_PROFILES];
 } asdcp_jpeg2000_sub_descriptor_t;
 
+/* Room for the MCA label subdescriptors a sound track file links: one
+   soundfield group plus one per channel, and ST 2067-2 allows 64 channels. */
+#define ASDCP_MAX_SOUND_SUB_DESCRIPTORS 72
+
+/* Every item of ASDCP::MXF::WaveAudioDescriptor and the classes it derives
+   from, so a caller can repeat the whole descriptor in an IMF CPL
+   EssenceDescriptorList. Each has_* flag guards the field below it; the items
+   without a flag are mandatory in asdcplib and always written. */
+typedef struct {
+    uint8_t instance_id[16];
+    int32_t has_generation_id;
+    uint8_t generation_id[16];
+
+    uint32_t locator_count;
+    uint8_t locators[ASDCP_MAX_LOCATORS][16];
+    uint32_t sub_descriptor_count;
+    uint8_t sub_descriptors[ASDCP_MAX_SOUND_SUB_DESCRIPTORS][16];
+
+    int32_t has_linked_track_id;
+    uint32_t linked_track_id;
+    asdcp_rational_t sample_rate;
+    int32_t has_container_duration;
+    uint64_t container_duration;
+    uint8_t essence_container[16];
+    int32_t has_codec;
+    uint8_t codec[16];
+
+    asdcp_rational_t audio_sampling_rate;
+    int32_t locked;
+    int32_t has_audio_ref_level;
+    uint8_t audio_ref_level;
+    int32_t has_electro_spatial_formulation;
+    uint8_t electro_spatial_formulation;
+    uint32_t channel_count;
+    uint32_t quantization_bits;
+    int32_t has_dial_norm;
+    uint8_t dial_norm;
+    uint8_t sound_essence_coding[16];
+    int32_t has_reference_audio_alignment_level;
+    uint8_t reference_audio_alignment_level;
+    int32_t has_reference_image_edit_rate;
+    asdcp_rational_t reference_image_edit_rate;
+
+    uint16_t block_align;
+    int32_t has_sequence_offset;
+    uint8_t sequence_offset;
+    uint32_t avg_bps;
+    int32_t has_channel_assignment;
+    uint8_t channel_assignment[16];
+} asdcp_wave_audio_descriptor_t;
+
 /* asdcplib refuses to write an MCA string longer than 128 bytes, so 128 plus a
    terminator holds anything it wrote. */
 #define ASDCP_MCA_STRING_CAPACITY 129
@@ -334,8 +385,10 @@ typedef struct {
 /* One SMPTE 377-4 MCA label subdescriptor. kind is 0 = audio channel,
    1 = soundfield group, 2 = group of soundfield groups. Strings are
    NUL-terminated and truncated to fit. Each has_* flag guards the field below
-   it; tag_symbol, label_dictionary_id and link_id are always present. */
+   it; instance_id, tag_symbol, label_dictionary_id and link_id are always
+   present. */
 typedef struct {
+    uint8_t instance_id[16];
     int32_t kind;
     char tag_symbol[ASDCP_MCA_STRING_CAPACITY];
     uint8_t label_dictionary_id[16];
@@ -656,6 +709,11 @@ asdcp_result_t asdcp_as02_pcm_reader_read_frame(asdcp_as02_pcm_reader_t r, uint3
    absent. */
 asdcp_result_t asdcp_as02_pcm_reader_read_channel_assignment(asdcp_as02_pcm_reader_t r,
     uint8_t* out_ul, int32_t* present);
+/* Every item of the WaveAudioDescriptor, enough to repeat it in an IMF CPL
+   EssenceDescriptorList. Fails when the descriptor links more subdescriptors
+   than out has room for, rather than returning a short list. */
+asdcp_result_t asdcp_as02_pcm_reader_read_wave_audio_descriptor(asdcp_as02_pcm_reader_t r,
+    asdcp_wave_audio_descriptor_t* out);
 /* Number of MCA label subdescriptors the WaveAudioDescriptor links. */
 asdcp_result_t asdcp_as02_pcm_reader_mca_label_count(asdcp_as02_pcm_reader_t r, uint32_t* out_count);
 /* Copy the index-th MCA label subdescriptor into out_label, in the order the
