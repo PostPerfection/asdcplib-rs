@@ -872,6 +872,15 @@ unsafe extern "C" {
         desc: *const AsdcpAudioDescriptor,
         header_size: u32,
     ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_writer_open_write_mca(
+        w: *mut AsdcpAs02PcmWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpAudioDescriptor,
+        mca_config: *const c_char,
+        mca_language: *const c_char,
+        header_size: u32,
+    ) -> AsdcpResult;
     pub fn asdcp_as02_pcm_writer_write_frame(
         w: *mut AsdcpAs02PcmWriter,
         frame_data: *const u8,
@@ -898,6 +907,20 @@ unsafe extern "C" {
     pub fn asdcp_as02_pcm_reader_fill_writer_info(
         r: *mut AsdcpAs02PcmReader,
         info: *mut AsdcpWriterInfo,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_reader_read_channel_assignment(
+        r: *mut AsdcpAs02PcmReader,
+        out_ul: *mut u8,
+        present: *mut c_int,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_reader_mca_label_count(
+        r: *mut AsdcpAs02PcmReader,
+        out_count: *mut u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_pcm_reader_mca_label_info(
+        r: *mut AsdcpAs02PcmReader,
+        index: u32,
+        out_label: *mut AsdcpMcaLabel,
     ) -> AsdcpResult;
     pub fn asdcp_as02_pcm_reader_read_frame(
         r: *mut AsdcpAs02PcmReader,

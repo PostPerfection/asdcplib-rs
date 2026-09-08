@@ -1847,7 +1847,7 @@ mod as02_jp2k_tests {
 #[cfg(test)]
 mod as02_pcm_tests {
     use asdcplib::as02::pcm::*;
-    use asdcplib::pcm::{AudioDescriptor, ChannelFormat};
+    use asdcplib::pcm::{AudioDescriptor, ChannelFormat, McaLabelKind, McaLabelSubDescriptor};
     use asdcplib::{Rational, WriterInfo};
 
     #[test]
@@ -1927,6 +1927,168 @@ mod as02_pcm_tests {
             reader.close().unwrap();
         }
 
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn mca_descriptor(channel_count: u32) -> AudioDescriptor {
+        let block_align = channel_count * 3;
+        AudioDescriptor {
+            edit_rate: Rational::new(24, 1),
+            audio_sampling_rate: Rational::new(48_000, 1),
+            locked: true,
+            channel_count,
+            quantization_bits: 24,
+            block_align,
+            avg_bps: block_align * 48_000,
+            linked_track_id: 0,
+            container_duration: 0,
+            channel_format: ChannelFormat::Cfg6,
+        }
+    }
+
+    /// Write one clip-wrapped frame of labelled PCM, then read the
+    /// ChannelAssignment and every MCA label subdescriptor back out.
+    fn write_and_read_mca(
+        tag: &str,
+        channel_count: u32,
+        mca_config: &str,
+        mca_language: Option<&str>,
+    ) -> (Option<[u8; 16]>, Vec<McaLabelSubDescriptor>) {
+        let path = crate::util::temp_path(tag);
+        let path_string = path.to_string_lossy().to_string();
+        let descriptor = mca_descriptor(channel_count);
+        // one 24fps frame at 48kHz is 2000 samples
+        let frame = vec![0x5a; (descriptor.block_align * 2_000) as usize];
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_mca(
+                    &path_string,
+                    &WriterInfo::default(),
+                    &descriptor,
+                    mca_config,
+                    mca_language,
+                    16_384,
+                )
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader
+            .open_read(&path_string, Rational::new(24, 1))
+            .unwrap();
+        let assignment = reader.channel_assignment().unwrap();
+        let labels = reader.mca_label_subdescriptors().unwrap();
+        reader.close().unwrap();
+        std::fs::remove_file(path).unwrap();
+        (assignment, labels)
+    }
+
+    /// An IMF stereo wrap carries the IMF MCA ChannelAssignment, one soundfield
+    /// group with the spoken language, and one channel label per channel linked
+    /// back to that group.
+    #[test]
+    fn test_as02_pcm_mca_stereo_roundtrip() {
+        let (assignment, labels) =
+            write_and_read_mca("as02-pcm-mca-stereo", 2, "ST(L,R)", Some("de-DE"));
+
+        assert_eq!(assignment, Some(IMF_CHANNEL_ASSIGNMENT_MCA));
+        assert_eq!(labels.len(), 3);
+
+        let group = &labels[0];
+        assert_eq!(group.kind, McaLabelKind::SoundfieldGroup);
+        assert_eq!(group.tag_symbol, "sgST");
+        assert_eq!(group.spoken_language.as_deref(), Some("de-DE"));
+
+        let channels = &labels[1..];
+        assert_eq!(channels.len(), 2);
+        for (index, symbol) in ["chL", "chR"].iter().enumerate() {
+            let channel = &channels[index];
+            assert_eq!(channel.kind, McaLabelKind::AudioChannel);
+            assert_eq!(&channel.tag_symbol, symbol);
+            assert_eq!(channel.channel_id, Some(index as u32 + 1));
+            assert_eq!(channel.soundfield_group_link_id, Some(group.link_id));
+        }
+    }
+
+    /// A 5.1 wrap carries six channel labels in channel order, one per channel
+    /// of the WaveAudioDescriptor.
+    #[test]
+    fn test_as02_pcm_mca_51_roundtrip() {
+        let (assignment, labels) =
+            write_and_read_mca("as02-pcm-mca-51", 6, "51(L,R,C,LFE,Ls,Rs)", Some("en-US"));
+
+        assert_eq!(assignment, Some(IMF_CHANNEL_ASSIGNMENT_MCA));
+        assert_eq!(labels.len(), 7);
+
+        let group = &labels[0];
+        assert_eq!(group.kind, McaLabelKind::SoundfieldGroup);
+        assert_eq!(group.tag_symbol, "sg51");
+        assert_eq!(group.spoken_language.as_deref(), Some("en-US"));
+
+        let symbols = ["chL", "chR", "chC", "chLFE", "chLs", "chRs"];
+        assert_eq!(labels[1..].len(), symbols.len());
+        for (index, symbol) in symbols.iter().enumerate() {
+            let channel = &labels[index + 1];
+            assert_eq!(channel.kind, McaLabelKind::AudioChannel);
+            assert_eq!(&channel.tag_symbol, symbol);
+            assert_eq!(channel.channel_id, Some(index as u32 + 1));
+            assert_eq!(channel.soundfield_group_link_id, Some(group.link_id));
+        }
+    }
+
+    /// A config naming a different number of channels than the descriptor is
+    /// refused rather than written.
+    #[test]
+    fn test_as02_pcm_mca_channel_count_mismatch_fails() {
+        let path = crate::util::temp_path("as02-pcm-mca-mismatch");
+        let path_string = path.to_string_lossy().to_string();
+        let mut writer = MxfWriter::new();
+        assert!(
+            writer
+                .open_write_mca(
+                    &path_string,
+                    &WriterInfo::default(),
+                    &mca_descriptor(6),
+                    "ST(L,R)",
+                    None,
+                    16_384,
+                )
+                .is_err()
+        );
+    }
+
+    /// A plain AS-02 PCM wrap carries no MCA labels and never the IMF
+    /// ChannelAssignment UL, which is what Photon rejects.
+    #[test]
+    fn test_as02_pcm_without_mca_labels_lacks_imf_channel_assignment() {
+        let path = crate::util::temp_path("as02-pcm-no-mca");
+        let path_string = path.to_string_lossy().to_string();
+        let descriptor = mca_descriptor(2);
+        let frame = vec![0x11; (descriptor.block_align * 2_000) as usize];
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &WriterInfo::default(), &descriptor, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader
+            .open_read(&path_string, Rational::new(24, 1))
+            .unwrap();
+        assert_ne!(
+            reader.channel_assignment().unwrap(),
+            Some(IMF_CHANNEL_ASSIGNMENT_MCA)
+        );
+        assert!(reader.mca_label_subdescriptors().unwrap().is_empty());
+        reader.close().unwrap();
         std::fs::remove_file(path).unwrap();
     }
 }

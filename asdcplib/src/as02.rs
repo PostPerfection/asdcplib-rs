@@ -470,9 +470,17 @@ pub mod jp2k {
 pub mod pcm {
     use crate::crypto::{AesDecContext, AesEncContext, HmacContext};
     use crate::error::{self, Result};
-    use crate::pcm::AudioDescriptor;
+    use crate::pcm::{AudioDescriptor, McaLabelSubDescriptor};
     use crate::{Rational, WriterInfo};
     use std::ffi::CString;
+
+    /// The ChannelAssignment UL an IMF audio track carries when its channels are
+    /// described by MCA labels (asdcplib MDD.cpp `IMFAudioChannelCfg_MCA`). The
+    /// d-cinema path uses `DCAudioChannelCfg_MCA` instead.
+    pub const IMF_CHANNEL_ASSIGNMENT_MCA: [u8; 16] = [
+        0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x02, 0x02, 0x10, 0x04, 0x01, 0x00,
+        0x00,
+    ];
 
     /// AS-02 PCM MXF writer.
     pub struct MxfWriter {
@@ -514,6 +522,50 @@ pub mod pcm {
                     cstr.as_ptr(),
                     &ffi_info,
                     &ffi_desc,
+                    header_size,
+                )
+            })
+        }
+
+        /// Open for writing with SMPTE 377-4 MCA label subdescriptors and the
+        /// IMF MCA ChannelAssignment UL ([`IMF_CHANNEL_ASSIGNMENT_MCA`]).
+        ///
+        /// `mca_config` is an as-02-wrap style config string, for example
+        /// `"ST(L,R)"` or `"51(L,R,C,LFE,Ls,Rs)"`. Its channel count must match
+        /// the descriptor's or the call fails.
+        ///
+        /// `mca_language` is the RFC 5646 code the SoundfieldGroupLabelSubDescriptor
+        /// carries, asdcplib's default `en-US` when `None`.
+        pub fn open_write_mca(
+            &mut self,
+            filename: &str,
+            info: &WriterInfo,
+            desc: &AudioDescriptor,
+            mca_config: &str,
+            mca_language: Option<&str>,
+            header_size: u32,
+        ) -> Result<()> {
+            let cstr = CString::new(filename)
+                .map_err(|_| crate::Error::InvalidArgument("null byte in filename"))?;
+            let mca = CString::new(mca_config)
+                .map_err(|_| crate::Error::InvalidArgument("null byte in mca config"))?;
+            let language = mca_language
+                .map(CString::new)
+                .transpose()
+                .map_err(|_| crate::Error::InvalidArgument("null byte in mca language"))?;
+            let language_ptr = language
+                .as_ref()
+                .map_or(std::ptr::null(), |value| value.as_ptr());
+            let ffi_info = info.to_ffi();
+            let ffi_desc = desc.to_ffi();
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_pcm_writer_open_write_mca(
+                    self.ptr,
+                    cstr.as_ptr(),
+                    &ffi_info,
+                    &ffi_desc,
+                    mca.as_ptr(),
+                    language_ptr,
                     header_size,
                 )
             })
@@ -602,6 +654,40 @@ pub mod pcm {
                 asdcplib_sys::asdcp_as02_pcm_reader_fill_writer_info(self.ptr, &mut ffi)
             })?;
             Ok(WriterInfo::from_ffi(&ffi))
+        }
+
+        /// The WaveAudioDescriptor's ChannelAssignment UL, `None` when the item
+        /// is absent. An IMF audio track has to carry
+        /// [`IMF_CHANNEL_ASSIGNMENT_MCA`].
+        pub fn channel_assignment(&mut self) -> Result<Option<[u8; 16]>> {
+            let mut ul = [0u8; 16];
+            let mut present: i32 = 0;
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_pcm_reader_read_channel_assignment(
+                    self.ptr,
+                    ul.as_mut_ptr(),
+                    &mut present,
+                )
+            })?;
+            Ok((present != 0).then_some(ul))
+        }
+
+        /// Every MCA label subdescriptor the WaveAudioDescriptor links, in the
+        /// order it links them. Empty when the MXF carries no MCA labels.
+        pub fn mca_label_subdescriptors(&mut self) -> Result<Vec<McaLabelSubDescriptor>> {
+            let mut count: u32 = 0;
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_pcm_reader_mca_label_count(self.ptr, &mut count)
+            })?;
+            let mut labels = Vec::with_capacity(count as usize);
+            for index in 0..count {
+                let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpMcaLabel>() };
+                error::check(unsafe {
+                    asdcplib_sys::asdcp_as02_pcm_reader_mca_label_info(self.ptr, index, &mut ffi)
+                })?;
+                labels.push(McaLabelSubDescriptor::from_ffi(&ffi)?);
+            }
+            Ok(labels)
         }
 
         pub fn read_frame(

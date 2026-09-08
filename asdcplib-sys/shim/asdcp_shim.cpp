@@ -779,10 +779,8 @@ asdcp_result_t asdcp_pcm_reader_mca_label_count(asdcp_pcm_reader_t r, uint32_t* 
     return ASDCP::RESULT_OK.Value();
 }
 
-asdcp_result_t asdcp_pcm_reader_mca_label_info(asdcp_pcm_reader_t r, uint32_t index,
-    asdcp_mca_label_t* out_label) {
-    std::list<ASDCP::MXF::InterchangeObject*> labels;
-    collect_mca_labels(static_cast<ASDCP::PCM::MXFReader*>(r)->OP1aHeader(), labels);
+static asdcp_result_t fill_mca_label(const std::list<ASDCP::MXF::InterchangeObject*>& labels,
+    uint32_t index, asdcp_mca_label_t* out_label) {
     if (index >= labels.size()) {
         return ASDCP::RESULT_RANGE.Value();
     }
@@ -818,6 +816,13 @@ asdcp_result_t asdcp_pcm_reader_mca_label_info(asdcp_pcm_reader_t r, uint32_t in
             channel->SoundfieldGroupLinkID.const_get().Value(), 16);
     }
     return ASDCP::RESULT_OK.Value();
+}
+
+asdcp_result_t asdcp_pcm_reader_mca_label_info(asdcp_pcm_reader_t r, uint32_t index,
+    asdcp_mca_label_t* out_label) {
+    std::list<ASDCP::MXF::InterchangeObject*> labels;
+    collect_mca_labels(static_cast<ASDCP::PCM::MXFReader*>(r)->OP1aHeader(), labels);
+    return fill_mca_label(labels, index, out_label);
 }
 
 /* ---- TimedText Writer ---- */
@@ -1822,6 +1827,60 @@ asdcp_result_t asdcp_as02_pcm_writer_open_write(asdcp_as02_pcm_writer_t w, const
         std::string(filename), wi, fd, subs, ad.EditRate, header_size).Value();
 }
 
+/* Open an AS-02 PCM MXF with MCA label subdescriptors. Mirrors
+   asdcp_pcm_writer_open_write_mca, but the AS-02 OpenWrite already takes the
+   subdescriptor list and links it, and the ChannelAssignment is the IMF UL
+   rather than the d-cinema one. */
+asdcp_result_t asdcp_as02_pcm_writer_open_write_mca(asdcp_as02_pcm_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc,
+    const char* mca_config, const char* mca_language, uint32_t header_size) {
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    wi.LabelSetType = ASDCP::LS_MXF_SMPTE;
+
+    ASDCP::PCM::AudioDescriptor ad;
+    c_to_cpp_audio_desc(desc, ad);
+
+    /* AS02_MCAConfigParser is the ASDCP one plus the IMF-only symbols, ST and
+       51EX among them, which an IMF audio track needs. */
+    ASDCP::MXF::AS02_MCAConfigParser mca(dict);
+    const bool decoded = (mca_language == 0 || mca_language[0] == '\0')
+        ? mca.DecodeString(std::string(mca_config))
+        : mca.DecodeString(std::string(mca_config), std::string(mca_language));
+    if (!decoded) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    ASDCP::MXF::InterchangeObject_list_t subs(mca.begin(), mca.end());
+    ASDCP::MXF::WaveAudioDescriptor* ed = new ASDCP::MXF::WaveAudioDescriptor(dict);
+    ASDCP::Result_t result = ASDCP::PCM_ADesc_to_MD(ad, ed);
+    if (ASDCP_SUCCESS(result) && mca.ChannelCount() != ed->ChannelCount) {
+        result = ASDCP::RESULT_FORMAT;
+    }
+    if (ASDCP_FAILURE(result)) {
+        delete ed;
+        for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
+            delete *i;
+        }
+        return result.Value();
+    }
+
+    ed->ChannelAssignment = ASDCP::UL(dict->ul(ASDCP::MDD_IMFAudioChannelCfg_MCA));
+
+    ASDCP::MXF::FileDescriptor* fd = static_cast<ASDCP::MXF::FileDescriptor*>(ed);
+    result = static_cast<AS_02::PCM::MXFWriter*>(w)->OpenWrite(
+        std::string(filename), wi, fd, subs, ad.EditRate, header_size);
+
+    /* OpenWrite zeroes the entries it took ownership of, so anything left is
+       still ours to free. */
+    for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
+        delete *i;
+    }
+    return result.Value();
+}
+
 asdcp_result_t asdcp_as02_pcm_writer_write_frame(asdcp_as02_pcm_writer_t w,
     const uint8_t* frame_data, uint32_t frame_size,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx) {
@@ -1898,6 +1957,34 @@ asdcp_result_t asdcp_as02_pcm_reader_read_frame(asdcp_as02_pcm_reader_t r, uint3
     );
     *out_size = fb.Size();
     return result.Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_read_channel_assignment(asdcp_as02_pcm_reader_t r,
+    uint8_t* out_ul, int32_t* present) {
+    AS_02::PCM::MXFReader* reader = static_cast<AS_02::PCM::MXFReader*>(r);
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(
+        ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_WaveAudioDescriptor), &obj);
+    ASDCP::MXF::WaveAudioDescriptor* wd = dynamic_cast<ASDCP::MXF::WaveAudioDescriptor*>(obj);
+    if (wd == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    copy_optional_ul(wd->ChannelAssignment, present, out_ul);
+    return ASDCP::RESULT_OK.Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_mca_label_count(asdcp_as02_pcm_reader_t r, uint32_t* out_count) {
+    std::list<ASDCP::MXF::InterchangeObject*> labels;
+    collect_mca_labels(static_cast<AS_02::PCM::MXFReader*>(r)->OP1aHeader(), labels);
+    *out_count = static_cast<uint32_t>(labels.size());
+    return ASDCP::RESULT_OK.Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_mca_label_info(asdcp_as02_pcm_reader_t r, uint32_t index,
+    asdcp_mca_label_t* out_label) {
+    std::list<ASDCP::MXF::InterchangeObject*> labels;
+    collect_mca_labels(static_cast<AS_02::PCM::MXFReader*>(r)->OP1aHeader(), labels);
+    return fill_mca_label(labels, index, out_label);
 }
 
 /* ---- AS-02 TimedText Writer ---- */

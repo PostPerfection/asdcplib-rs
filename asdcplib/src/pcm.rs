@@ -326,7 +326,7 @@ pub struct McaLabelSubDescriptor {
 }
 
 impl McaLabelSubDescriptor {
-    fn from_ffi(ffi: &asdcplib_sys::AsdcpMcaLabel) -> Result<Self> {
+    pub(crate) fn from_ffi(ffi: &asdcplib_sys::AsdcpMcaLabel) -> Result<Self> {
         let kind = match ffi.kind {
             0 => McaLabelKind::AudioChannel,
             1 => McaLabelKind::SoundfieldGroup,

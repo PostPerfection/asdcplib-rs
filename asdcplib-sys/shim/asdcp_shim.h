@@ -607,6 +607,13 @@ asdcp_as02_pcm_writer_t asdcp_as02_pcm_writer_new(void);
 void asdcp_as02_pcm_writer_free(asdcp_as02_pcm_writer_t w);
 asdcp_result_t asdcp_as02_pcm_writer_open_write(asdcp_as02_pcm_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc, uint32_t header_size);
+/* Open an AS-02 PCM MXF with SMPTE 377-4 MCA label subdescriptors parsed from an
+   as-02-wrap style config string, e.g. "ST(L,R)" or "51(L,R,C,LFE,Ls,Rs)", and
+   set the IMF MCA ChannelAssignment UL. mca_language is the RFC 5646 code the
+   labels carry, asdcplib's en-US default when null or empty. */
+asdcp_result_t asdcp_as02_pcm_writer_open_write_mca(asdcp_as02_pcm_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc,
+    const char* mca_config, const char* mca_language, uint32_t header_size);
 asdcp_result_t asdcp_as02_pcm_writer_write_frame(asdcp_as02_pcm_writer_t w,
     const uint8_t* frame_data, uint32_t frame_size,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
@@ -623,6 +630,16 @@ asdcp_result_t asdcp_as02_pcm_reader_fill_writer_info(asdcp_as02_pcm_reader_t r,
 asdcp_result_t asdcp_as02_pcm_reader_read_frame(asdcp_as02_pcm_reader_t r, uint32_t frame_number,
     uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
     asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
+/* The WaveAudioDescriptor's ChannelAssignment UL, present = 0 when the item is
+   absent. */
+asdcp_result_t asdcp_as02_pcm_reader_read_channel_assignment(asdcp_as02_pcm_reader_t r,
+    uint8_t* out_ul, int32_t* present);
+/* Number of MCA label subdescriptors the WaveAudioDescriptor links. */
+asdcp_result_t asdcp_as02_pcm_reader_mca_label_count(asdcp_as02_pcm_reader_t r, uint32_t* out_count);
+/* Copy the index-th MCA label subdescriptor into out_label, in the order the
+   WaveAudioDescriptor links them. */
+asdcp_result_t asdcp_as02_pcm_reader_mca_label_info(asdcp_as02_pcm_reader_t r, uint32_t index,
+    asdcp_mca_label_t* out_label);
 
 /* AS-02 TimedText Writer */
 asdcp_as02_timed_text_writer_t asdcp_as02_timed_text_writer_new(void);
