@@ -54,7 +54,7 @@ AS-DCP (d-cinema, ST 429) read/write:
 AS-02 (IMF, ST 2067-5) read/write, in the `as02` module:
 
 - JPEG 2000 (frame-wrapped)
-- PCM audio (clip-wrapped)
+- PCM audio (clip-wrapped), with SMPTE ST 377-4 MCA labels and the IMF MCA ChannelAssignment UL
 - Timed Text (SMPTE ST 2067-2)
 
 Other AS-02 essence (ISXD, ACES, IAB, JPEG XS) is detection-only via `essence_type`.
