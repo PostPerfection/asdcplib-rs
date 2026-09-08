@@ -1449,6 +1449,16 @@ mod as02_jp2k_tests {
         PICTURE_ESSENCE_CODING_IMF_4K_LOSSY_6_3, PictureDescriptor, TRANSFER_CHARACTERISTIC_ST2084,
     };
 
+    /// RGBAValue_RGB_12: what a 12-bit RGB codestream produces for both
+    /// PixelLayout and J2CLayout.
+    const RGB_12_LAYOUT: [u8; 16] = [b'R', 12, b'G', 12, b'B', 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    /// SMPTE 377-1 FrameLayout for a progressive frame.
+    const FRAME_LAYOUT_FULL_FRAME: u8 = 0;
+
+    /// SMPTE 377-1 ScanningDirection for left to right, top to bottom.
+    const SCANNING_DIRECTION_LEFT_TO_RIGHT_TOP_TO_BOTTOM: u8 = 0;
+
     fn descriptor_for(fixture_name: &str, frames: u32) -> PictureDescriptor {
         let codestream = CodestreamHeader::parse(&crate::util::fixture(fixture_name)).unwrap();
         PictureDescriptor {
@@ -1666,6 +1676,144 @@ mod as02_jp2k_tests {
         }
 
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// Every RGBA descriptor and JPEG 2000 sub-descriptor item an IMF CPL
+    /// EssenceDescriptorList has to repeat, read back off a two-frame 12-bit RGB
+    /// file. Photon compares the CPL entry against these values verbatim.
+    #[test]
+    fn test_as02_jp2k_full_descriptors_roundtrip() {
+        let path = crate::util::temp_path("as02-jp2k-full-descriptors");
+        let path_string = path.to_string_lossy().to_string();
+        let frame = crate::util::fixture(crate::util::IMF_4K_FIXTURE);
+        let written = descriptor(2);
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &WriterInfo::default(), &written, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        let rgba = reader.rgba_essence_descriptor().unwrap();
+        let sub = reader.jpeg2000_sub_descriptor().unwrap();
+        reader.close().unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_ne!(rgba.instance_id, [0u8; 16]);
+        assert_ne!(sub.instance_id, [0u8; 16]);
+        assert_eq!(rgba.sub_descriptors, vec![sub.instance_id]);
+        assert_eq!(rgba.locators, Vec::<[u8; 16]>::new());
+        assert_eq!(rgba.generation_id, None);
+        assert_eq!(sub.generation_id, None);
+
+        assert_eq!(rgba.linked_track_id, Some(1));
+        assert_eq!(rgba.sample_rate, asdcplib::EDIT_RATE_24);
+        assert_eq!(rgba.container_duration, Some(2));
+        assert_ne!(rgba.essence_container, [0u8; 16]);
+        assert_eq!(rgba.codec, None);
+
+        assert_eq!(rgba.frame_layout, FRAME_LAYOUT_FULL_FRAME);
+        assert_eq!(rgba.stored_width, 3840);
+        assert_eq!(rgba.stored_height, 2160);
+        assert_eq!(rgba.aspect_ratio, asdcplib::Rational::new(3840, 2160));
+        assert_eq!(
+            rgba.picture_essence_coding,
+            PICTURE_ESSENCE_CODING_IMF_4K_LOSSY_6_3
+        );
+        assert_eq!(
+            rgba.scanning_direction,
+            Some(SCANNING_DIRECTION_LEFT_TO_RIGHT_TOP_TO_BOTTOM)
+        );
+        assert_eq!(rgba.video_line_map, Some([1, 0]));
+        assert_eq!(rgba.pixel_layout, RGB_12_LAYOUT);
+        assert_eq!(rgba.component_min_ref, Some(0));
+        assert_eq!(rgba.component_max_ref, Some(4095));
+        assert_eq!(rgba.alpha_min_ref, None);
+        assert_eq!(rgba.alpha_max_ref, None);
+        assert_eq!(rgba.hdr, HdrMetadata::default());
+        assert_eq!(rgba.coding_equations, None);
+        assert_eq!(rgba.alternative_center_cuts, Vec::<[u8; 16]>::new());
+
+        // the sub-descriptor repeats the codestream's SIZ grid
+        let codestream = &written.codestream;
+        assert_eq!(sub.rsize, codestream.rsize);
+        assert_eq!(sub.xsize, codestream.xsize);
+        assert_eq!(sub.ysize, codestream.ysize);
+        assert_eq!(sub.x_osize, codestream.x_osize);
+        assert_eq!(sub.y_osize, codestream.y_osize);
+        assert_eq!(sub.xt_size, codestream.xt_size);
+        assert_eq!(sub.yt_size, codestream.yt_size);
+        assert_eq!(sub.xt_osize, codestream.xt_osize);
+        assert_eq!(sub.yt_osize, codestream.yt_osize);
+        assert_eq!(sub.csize, codestream.components.len() as u16);
+
+        // count and item size, then Ssize, XRsize, YRsize per component
+        let mut expected_sizing = vec![0, 0, 0, 3, 0, 0, 0, 3];
+        for component in &codestream.components {
+            expected_sizing.extend([component.ssize, component.x_rsize, component.y_rsize]);
+        }
+        assert_eq!(sub.picture_component_sizing, Some(expected_sizing));
+
+        let coding_style = sub.coding_style_default.as_ref().unwrap();
+        assert_eq!(coding_style[0], codestream.coding_style_default.scod);
+        assert_eq!(
+            coding_style[1],
+            codestream.coding_style_default.progression_order
+        );
+        let quantization = sub.quantization_default.as_ref().unwrap();
+        assert_eq!(quantization[0], codestream.quantization_default.sqcd);
+        assert_eq!(
+            &quantization[1..],
+            codestream.quantization_default.spqcd.as_slice()
+        );
+
+        // 3 components at 12 bits, so the same layout the descriptor carries
+        assert_eq!(sub.j2c_layout, Some(RGB_12_LAYOUT));
+        assert_eq!(
+            sub.extended_capabilities,
+            codestream.extended_capabilities.clone()
+        );
+    }
+
+    /// A 12-bit RGB codestream reads back a J2CLayout of three components at 12
+    /// bits, which is where Photon takes PixelBitDepth from.
+    #[test]
+    fn test_as02_jp2k_j2c_layout_follows_component_precision() {
+        let path = crate::util::temp_path("as02-jp2k-j2c-layout");
+        let path_string = path.to_string_lossy().to_string();
+        let frame = crate::util::fixture(crate::util::CINEMA_2K_FIXTURE);
+        let written = descriptor_for(crate::util::CINEMA_2K_FIXTURE, 1);
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(&path_string, &WriterInfo::default(), &written, 16_384)
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        let sub = reader.jpeg2000_sub_descriptor().unwrap();
+        reader.close().unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        let layout = sub.j2c_layout.unwrap();
+        for (index, component) in written.codestream.components.iter().enumerate() {
+            assert_eq!(layout[index * 2], RGB_12_LAYOUT[index * 2]);
+            assert_eq!(layout[index * 2 + 1], component.bit_depth());
+        }
+        assert_eq!(
+            &layout[written.codestream.components.len() * 2..],
+            &[0u8; 10]
+        );
     }
 
     /// A plain AS-02 writer sets no HDR metadata, so every field reads back None.

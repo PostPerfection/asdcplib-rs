@@ -1519,39 +1519,228 @@ asdcp_result_t asdcp_as02_jp2k_reader_fill_picture_descriptor(asdcp_as02_jp2k_re
     return result.Value();
 }
 
-asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reader_t r,
-    asdcp_rgba_descriptor_t* out) {
-    AS_02::JP2K::MXFReader* reader = static_cast<AS_02::JP2K::MXFReader*>(r);
-    const ASDCP::Dictionary& dict = ASDCP::DefaultCompositeDict();
+/* optional_property copy helpers: each writes the has_* flag and leaves the
+   value zeroed when the item is absent. */
+template <typename PropertyType, typename OutType>
+static void copy_optional_number(const ASDCP::MXF::optional_property<PropertyType>& src,
+    int32_t* has_value, OutType* out) {
+    *has_value = src.empty() ? 0 : 1;
+    if (!src.empty()) {
+        *out = static_cast<OutType>(src.const_get());
+    }
+}
 
-    memset(out, 0, sizeof(*out));
+static void copy_optional_ul(const ASDCP::MXF::optional_property<ASDCP::UL>& src,
+    int32_t* has_value, uint8_t* out) {
+    *has_value = src.empty() ? 0 : 1;
+    if (!src.empty()) {
+        memcpy(out, src.const_get().Value(), ASDCP::SMPTE_UL_LENGTH);
+    }
+}
+
+/* RGBALayout keeps its bytes private, so archive them out. */
+static bool copy_rgba_layout(const ASDCP::MXF::RGBALayout& layout, uint8_t* out) {
+    Kumu::MemIOWriter writer(out, ASDCP::MXF::RGBAValueLength);
+    return layout.Archive(&writer);
+}
+
+static void copy_optional_raw(const ASDCP::MXF::optional_property<ASDCP::MXF::Raw>& src,
+    int32_t* has_value, uint32_t* out_length, uint8_t* out) {
+    *has_value = src.empty() ? 0 : 1;
+    if (src.empty()) {
+        return;
+    }
+    uint32_t length = src.const_get().Length();
+    if (length > ASDCP_DESCRIPTOR_RAW_CAPACITY) {
+        length = ASDCP_DESCRIPTOR_RAW_CAPACITY;
+    }
+    memcpy(out, src.const_get().RoData(), length);
+    *out_length = length;
+}
+
+static void copy_ui16_array(const ASDCP::MXF::optional_property<ASDCP::MXF::Array<Kumu::ArchivableUi16> >& src,
+    int32_t* has_value, uint32_t* out_count, uint16_t* out) {
+    *has_value = src.empty() ? 0 : 1;
+    if (src.empty()) {
+        return;
+    }
+    uint32_t count = 0;
+    ASDCP::MXF::Array<Kumu::ArchivableUi16>::const_iterator i;
+    for (i = src.const_get().begin(); i != src.const_get().end() && count < ASDCP_JP2K_MAX_PROFILES; ++i) {
+        out[count++] = i->value;
+    }
+    *out_count = count;
+}
+
+static ASDCP::MXF::RGBAEssenceDescriptor* as02_rgba_descriptor(asdcp_as02_jp2k_reader_t r) {
+    AS_02::JP2K::MXFReader* reader = static_cast<AS_02::JP2K::MXFReader*>(r);
     ASDCP::MXF::InterchangeObject* obj = 0;
-    reader->OP1aHeader().GetMDObjectByType(dict.ul(ASDCP::MDD_RGBAEssenceDescriptor), &obj);
-    ASDCP::MXF::RGBAEssenceDescriptor* ed =
-        dynamic_cast<ASDCP::MXF::RGBAEssenceDescriptor*>(obj);
+    reader->OP1aHeader().GetMDObjectByType(
+        ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_RGBAEssenceDescriptor), &obj);
+    return dynamic_cast<ASDCP::MXF::RGBAEssenceDescriptor*>(obj);
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_essence_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_rgba_essence_descriptor_t* out) {
+    ASDCP::MXF::RGBAEssenceDescriptor* ed = as02_rgba_descriptor(r);
     if (ed == 0) {
         return ASDCP::RESULT_FORMAT.Value();
     }
 
-    if (ed->PictureEssenceCoding.HasValue()) {
-        memcpy(out->picture_essence_coding, ed->PictureEssenceCoding.Value(), 16);
-        out->has_picture_essence_coding = 1;
+    memset(out, 0, sizeof(*out));
+    memcpy(out->instance_id, ed->InstanceUID.Value(), ASDCP::UUIDlen);
+    out->has_generation_id = ed->GenerationUID.empty() ? 0 : 1;
+    if (!ed->GenerationUID.empty()) {
+        memcpy(out->generation_id, ed->GenerationUID.const_get().Value(), ASDCP::UUIDlen);
     }
 
-    // RGBALayout keeps its bytes private, so archive them out.
-    Kumu::MemIOWriter layout_writer(out->pixel_layout, sizeof(out->pixel_layout));
-    if (!ed->PixelLayout.Archive(&layout_writer)) {
+    for (size_t k = 0; k < ed->Locators.size() && k < ASDCP_MAX_LOCATORS; ++k) {
+        memcpy(out->locators[k], ed->Locators[k].Value(), ASDCP::UUIDlen);
+        out->locator_count++;
+    }
+    for (size_t k = 0; k < ed->SubDescriptors.size() && k < ASDCP_MAX_SUB_DESCRIPTORS; ++k) {
+        memcpy(out->sub_descriptors[k], ed->SubDescriptors[k].Value(), ASDCP::UUIDlen);
+        out->sub_descriptor_count++;
+    }
+
+    copy_optional_number(ed->LinkedTrackID, &out->has_linked_track_id, &out->linked_track_id);
+    out->sample_rate.numerator = ed->SampleRate.Numerator;
+    out->sample_rate.denominator = ed->SampleRate.Denominator;
+    copy_optional_number(ed->ContainerDuration, &out->has_container_duration, &out->container_duration);
+    memcpy(out->essence_container, ed->EssenceContainer.Value(), ASDCP::SMPTE_UL_LENGTH);
+    copy_optional_ul(ed->Codec, &out->has_codec, out->codec);
+
+    copy_optional_number(ed->SignalStandard, &out->has_signal_standard, &out->signal_standard);
+    out->frame_layout = ed->FrameLayout;
+    out->stored_width = ed->StoredWidth;
+    out->stored_height = ed->StoredHeight;
+    copy_optional_number(ed->StoredF2Offset, &out->has_stored_f2_offset, &out->stored_f2_offset);
+    copy_optional_number(ed->SampledWidth, &out->has_sampled_width, &out->sampled_width);
+    copy_optional_number(ed->SampledHeight, &out->has_sampled_height, &out->sampled_height);
+    copy_optional_number(ed->SampledXOffset, &out->has_sampled_x_offset, &out->sampled_x_offset);
+    copy_optional_number(ed->SampledYOffset, &out->has_sampled_y_offset, &out->sampled_y_offset);
+    copy_optional_number(ed->DisplayHeight, &out->has_display_height, &out->display_height);
+    copy_optional_number(ed->DisplayWidth, &out->has_display_width, &out->display_width);
+    copy_optional_number(ed->DisplayXOffset, &out->has_display_x_offset, &out->display_x_offset);
+    copy_optional_number(ed->DisplayYOffset, &out->has_display_y_offset, &out->display_y_offset);
+    copy_optional_number(ed->DisplayF2Offset, &out->has_display_f2_offset, &out->display_f2_offset);
+    out->aspect_ratio.numerator = ed->AspectRatio.Numerator;
+    out->aspect_ratio.denominator = ed->AspectRatio.Denominator;
+    copy_optional_number(ed->ActiveFormatDescriptor, &out->has_active_format_descriptor,
+        &out->active_format_descriptor);
+    copy_optional_number(ed->AlphaTransparency, &out->has_alpha_transparency, &out->alpha_transparency);
+    copy_optional_number(ed->ImageAlignmentOffset, &out->has_image_alignment_offset,
+        &out->image_alignment_offset);
+    copy_optional_number(ed->ImageStartOffset, &out->has_image_start_offset, &out->image_start_offset);
+    copy_optional_number(ed->ImageEndOffset, &out->has_image_end_offset, &out->image_end_offset);
+    copy_optional_number(ed->FieldDominance, &out->has_field_dominance, &out->field_dominance);
+    memcpy(out->picture_essence_coding, ed->PictureEssenceCoding.Value(), ASDCP::SMPTE_UL_LENGTH);
+    copy_optional_ul(ed->CodingEquations, &out->has_coding_equations, out->coding_equations);
+    if (!ed->AlternativeCenterCuts.empty()) {
+        ASDCP::MXF::Batch<ASDCP::UL>::const_iterator i;
+        for (i = ed->AlternativeCenterCuts.const_get().begin();
+             i != ed->AlternativeCenterCuts.const_get().end() &&
+             out->alternative_center_cut_count < ASDCP_MAX_ALTERNATIVE_CENTER_CUTS; ++i) {
+            memcpy(out->alternative_center_cuts[out->alternative_center_cut_count],
+                i->Value(), ASDCP::SMPTE_UL_LENGTH);
+            out->alternative_center_cut_count++;
+        }
+    }
+    copy_optional_number(ed->ActiveWidth, &out->has_active_width, &out->active_width);
+    copy_optional_number(ed->ActiveHeight, &out->has_active_height, &out->active_height);
+    copy_optional_number(ed->ActiveXOffset, &out->has_active_x_offset, &out->active_x_offset);
+    copy_optional_number(ed->ActiveYOffset, &out->has_active_y_offset, &out->active_y_offset);
+    out->has_video_line_map = ed->VideoLineMap.empty() ? 0 : 1;
+    if (!ed->VideoLineMap.empty()) {
+        out->video_line_map[0] = ed->VideoLineMap.const_get().First;
+        out->video_line_map[1] = ed->VideoLineMap.const_get().Second;
+    }
+    read_hdr_metadata(ed, &out->hdr);
+
+    copy_optional_number(ed->ComponentMaxRef, &out->has_component_max_ref, &out->component_max_ref);
+    copy_optional_number(ed->ComponentMinRef, &out->has_component_min_ref, &out->component_min_ref);
+    copy_optional_number(ed->AlphaMinRef, &out->has_alpha_min_ref, &out->alpha_min_ref);
+    copy_optional_number(ed->AlphaMaxRef, &out->has_alpha_max_ref, &out->alpha_max_ref);
+    copy_optional_number(ed->ScanningDirection, &out->has_scanning_direction, &out->scanning_direction);
+    if (!copy_rgba_layout(ed->PixelLayout, out->pixel_layout)) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    return ASDCP::RESULT_OK.Value();
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_rgba_descriptor_t* out) {
+    asdcp_rgba_essence_descriptor_t full;
+    asdcp_result_t result = asdcp_as02_jp2k_reader_read_rgba_essence_descriptor(r, &full);
+    if (!ASDCP_SUCCESS(result)) {
+        return result;
+    }
+    memset(out, 0, sizeof(*out));
+    out->has_picture_essence_coding = 1;
+    memcpy(out->picture_essence_coding, full.picture_essence_coding, ASDCP::SMPTE_UL_LENGTH);
+    memcpy(out->pixel_layout, full.pixel_layout, ASDCP::MXF::RGBAValueLength);
+    out->has_component_max_ref = full.has_component_max_ref;
+    out->component_max_ref = full.component_max_ref;
+    out->has_component_min_ref = full.has_component_min_ref;
+    out->component_min_ref = full.component_min_ref;
+    return result;
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_read_jpeg2000_sub_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_jpeg2000_sub_descriptor_t* out) {
+    AS_02::JP2K::MXFReader* reader = static_cast<AS_02::JP2K::MXFReader*>(r);
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(
+        ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_JPEG2000PictureSubDescriptor), &obj);
+    ASDCP::MXF::JPEG2000PictureSubDescriptor* sub =
+        dynamic_cast<ASDCP::MXF::JPEG2000PictureSubDescriptor*>(obj);
+    if (sub == 0) {
         return ASDCP::RESULT_FORMAT.Value();
     }
 
-    if (!ed->ComponentMaxRef.empty()) {
-        out->component_max_ref = ed->ComponentMaxRef.const_get();
-        out->has_component_max_ref = 1;
+    memset(out, 0, sizeof(*out));
+    memcpy(out->instance_id, sub->InstanceUID.Value(), ASDCP::UUIDlen);
+    out->has_generation_id = sub->GenerationUID.empty() ? 0 : 1;
+    if (!sub->GenerationUID.empty()) {
+        memcpy(out->generation_id, sub->GenerationUID.const_get().Value(), ASDCP::UUIDlen);
     }
-    if (!ed->ComponentMinRef.empty()) {
-        out->component_min_ref = ed->ComponentMinRef.const_get();
-        out->has_component_min_ref = 1;
+
+    out->rsize = sub->Rsize;
+    out->xsize = sub->Xsize;
+    out->ysize = sub->Ysize;
+    out->x_osize = sub->XOsize;
+    out->y_osize = sub->YOsize;
+    out->xt_size = sub->XTsize;
+    out->yt_size = sub->YTsize;
+    out->xt_osize = sub->XTOsize;
+    out->yt_osize = sub->YTOsize;
+    out->csize = sub->Csize;
+
+    copy_optional_raw(sub->PictureComponentSizing, &out->has_picture_component_sizing,
+        &out->picture_component_sizing_length, out->picture_component_sizing);
+    copy_optional_raw(sub->CodingStyleDefault, &out->has_coding_style_default,
+        &out->coding_style_default_length, out->coding_style_default);
+    copy_optional_raw(sub->QuantizationDefault, &out->has_quantization_default,
+        &out->quantization_default_length, out->quantization_default);
+
+    out->has_j2c_layout = sub->J2CLayout.empty() ? 0 : 1;
+    if (!sub->J2CLayout.empty() && !copy_rgba_layout(sub->J2CLayout.const_get(), out->j2c_layout)) {
+        return ASDCP::RESULT_FORMAT.Value();
     }
+
+    out->has_extended_capabilities = sub->J2KExtendedCapabilities.empty() ? 0 : 1;
+    if (!sub->J2KExtendedCapabilities.empty()) {
+        out->pcap = sub->J2KExtendedCapabilities.const_get().Pcap;
+        ASDCP::MXF::Array<Kumu::ArchivableUi16>::const_iterator i;
+        for (i = sub->J2KExtendedCapabilities.const_get().Ccap.begin();
+             i != sub->J2KExtendedCapabilities.const_get().Ccap.end() &&
+             out->capability_count < ASDCP_JP2K_MAX_CAPABILITIES; ++i) {
+            out->ccap[out->capability_count++] = i->value;
+        }
+    }
+    copy_ui16_array(sub->J2KProfile, &out->has_profile, &out->profile_count, out->profile);
+    copy_ui16_array(sub->J2KCorrespondingProfile, &out->has_corresponding_profile,
+        &out->corresponding_profile_count, out->corresponding_profile);
     return ASDCP::RESULT_OK.Value();
 }
 

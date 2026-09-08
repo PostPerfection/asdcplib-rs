@@ -176,6 +176,157 @@ typedef struct {
     uint32_t mastering_display_min_luminance;
 } asdcp_hdr_metadata_t;
 
+/* Room for the strong references a picture essence descriptor holds. AS-02 JP2K
+   writes one sub-descriptor and no locators; the extra room is for files this
+   library did not write. */
+#define ASDCP_MAX_SUB_DESCRIPTORS 16
+#define ASDCP_MAX_LOCATORS 8
+#define ASDCP_MAX_ALTERNATIVE_CENTER_CUTS 8
+
+/* Every item of ASDCP::MXF::RGBAEssenceDescriptor and the classes it derives
+   from, so a caller can repeat the whole descriptor in an IMF CPL
+   EssenceDescriptorList. Each has_* flag guards the field below it; the items
+   without a flag are mandatory in asdcplib and always written. hdr carries
+   TransferCharacteristic, ColorPrimaries and the ST 2086 mastering display
+   block, which live on GenericPictureEssenceDescriptor. */
+typedef struct {
+    uint8_t instance_id[16];
+    int32_t has_generation_id;
+    uint8_t generation_id[16];
+
+    uint32_t locator_count;
+    uint8_t locators[ASDCP_MAX_LOCATORS][16];
+    uint32_t sub_descriptor_count;
+    uint8_t sub_descriptors[ASDCP_MAX_SUB_DESCRIPTORS][16];
+
+    int32_t has_linked_track_id;
+    uint32_t linked_track_id;
+    asdcp_rational_t sample_rate;
+    int32_t has_container_duration;
+    uint64_t container_duration;
+    uint8_t essence_container[16];
+    int32_t has_codec;
+    uint8_t codec[16];
+
+    int32_t has_signal_standard;
+    uint8_t signal_standard;
+    uint8_t frame_layout;
+    uint32_t stored_width;
+    uint32_t stored_height;
+    int32_t has_stored_f2_offset;
+    uint32_t stored_f2_offset;
+    int32_t has_sampled_width;
+    uint32_t sampled_width;
+    int32_t has_sampled_height;
+    uint32_t sampled_height;
+    int32_t has_sampled_x_offset;
+    uint32_t sampled_x_offset;
+    int32_t has_sampled_y_offset;
+    uint32_t sampled_y_offset;
+    int32_t has_display_height;
+    uint32_t display_height;
+    int32_t has_display_width;
+    uint32_t display_width;
+    int32_t has_display_x_offset;
+    uint32_t display_x_offset;
+    int32_t has_display_y_offset;
+    uint32_t display_y_offset;
+    int32_t has_display_f2_offset;
+    uint32_t display_f2_offset;
+    asdcp_rational_t aspect_ratio;
+    int32_t has_active_format_descriptor;
+    uint8_t active_format_descriptor;
+    int32_t has_alpha_transparency;
+    uint8_t alpha_transparency;
+    int32_t has_image_alignment_offset;
+    uint32_t image_alignment_offset;
+    int32_t has_image_start_offset;
+    uint32_t image_start_offset;
+    int32_t has_image_end_offset;
+    uint32_t image_end_offset;
+    int32_t has_field_dominance;
+    uint8_t field_dominance;
+    uint8_t picture_essence_coding[16];
+    int32_t has_coding_equations;
+    uint8_t coding_equations[16];
+    uint32_t alternative_center_cut_count;
+    uint8_t alternative_center_cuts[ASDCP_MAX_ALTERNATIVE_CENTER_CUTS][16];
+    int32_t has_active_width;
+    uint32_t active_width;
+    int32_t has_active_height;
+    uint32_t active_height;
+    int32_t has_active_x_offset;
+    uint32_t active_x_offset;
+    int32_t has_active_y_offset;
+    uint32_t active_y_offset;
+    int32_t has_video_line_map;
+    uint32_t video_line_map[2];
+    asdcp_hdr_metadata_t hdr;
+
+    int32_t has_component_max_ref;
+    uint32_t component_max_ref;
+    int32_t has_component_min_ref;
+    uint32_t component_min_ref;
+    int32_t has_alpha_min_ref;
+    uint32_t alpha_min_ref;
+    int32_t has_alpha_max_ref;
+    uint32_t alpha_max_ref;
+    int32_t has_scanning_direction;
+    uint8_t scanning_direction;
+    uint8_t pixel_layout[16];
+} asdcp_rgba_essence_descriptor_t;
+
+/* Holds the longest raw marker segment the sub-descriptor carries,
+   QuantizationDefault at Sqcd plus MaxDefaults step sizes. */
+#define ASDCP_DESCRIPTOR_RAW_CAPACITY (ASDCP_JP2K_MAX_QUANTIZATION_STEPS + 1)
+
+/* Mirrors of ASDCP::JP2K::MaxPRFN and MaxCPFN. */
+#define ASDCP_JP2K_MAX_PROFILES 4
+
+/* Every item of ASDCP::MXF::JPEG2000PictureSubDescriptor. The three raw marker
+   segments and the two profile arrays carry their own length, and every has_*
+   flag guards the field below it. */
+typedef struct {
+    uint8_t instance_id[16];
+    int32_t has_generation_id;
+    uint8_t generation_id[16];
+
+    uint16_t rsize;
+    uint32_t xsize;
+    uint32_t ysize;
+    uint32_t x_osize;
+    uint32_t y_osize;
+    uint32_t xt_size;
+    uint32_t yt_size;
+    uint32_t xt_osize;
+    uint32_t yt_osize;
+    uint16_t csize;
+
+    int32_t has_picture_component_sizing;
+    uint32_t picture_component_sizing_length;
+    uint8_t picture_component_sizing[ASDCP_DESCRIPTOR_RAW_CAPACITY];
+    int32_t has_coding_style_default;
+    uint32_t coding_style_default_length;
+    uint8_t coding_style_default[ASDCP_DESCRIPTOR_RAW_CAPACITY];
+    int32_t has_quantization_default;
+    uint32_t quantization_default_length;
+    uint8_t quantization_default[ASDCP_DESCRIPTOR_RAW_CAPACITY];
+
+    int32_t has_j2c_layout;
+    uint8_t j2c_layout[16];
+
+    int32_t has_extended_capabilities;
+    uint32_t pcap;
+    uint32_t capability_count;
+    uint16_t ccap[ASDCP_JP2K_MAX_CAPABILITIES];
+    int32_t has_profile;
+    uint32_t profile_count;
+    uint16_t profile[ASDCP_JP2K_MAX_PROFILES];
+    int32_t has_corresponding_profile;
+    uint32_t corresponding_profile_count;
+    uint16_t corresponding_profile[ASDCP_JP2K_MAX_PROFILES];
+} asdcp_jpeg2000_sub_descriptor_t;
+
 /* asdcplib refuses to write an MCA string longer than 128 bytes, so 128 plus a
    terminator holds anything it wrote. */
 #define ASDCP_MCA_STRING_CAPACITY 129
@@ -436,6 +587,14 @@ asdcp_result_t asdcp_as02_jp2k_reader_fill_picture_descriptor(asdcp_as02_jp2k_re
    component reference levels. */
 asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reader_t r,
     asdcp_rgba_descriptor_t* out);
+/* Read every item of the RGBA essence descriptor, enough to repeat it in an IMF
+   CPL EssenceDescriptorList. */
+asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_essence_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_rgba_essence_descriptor_t* out);
+/* Read every item of the JPEG2000PictureSubDescriptor the RGBA essence
+   descriptor links. */
+asdcp_result_t asdcp_as02_jp2k_reader_read_jpeg2000_sub_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_jpeg2000_sub_descriptor_t* out);
 /* Read all HDR/WCG picture metadata off the AS-02 descriptor. */
 asdcp_result_t asdcp_as02_jp2k_reader_read_hdr(asdcp_as02_jp2k_reader_t r, asdcp_hdr_metadata_t* hdr);
 asdcp_result_t asdcp_as02_jp2k_reader_fill_writer_info(asdcp_as02_jp2k_reader_t r, asdcp_writer_info_t* info);

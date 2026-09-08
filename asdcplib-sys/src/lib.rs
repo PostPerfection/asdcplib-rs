@@ -230,6 +230,152 @@ pub struct AsdcpHdrMetadata {
     pub mastering_display_min_luminance: u32,
 }
 
+/// Room for the strong references a picture essence descriptor holds.
+pub const ASDCP_MAX_SUB_DESCRIPTORS: usize = 16;
+pub const ASDCP_MAX_LOCATORS: usize = 8;
+pub const ASDCP_MAX_ALTERNATIVE_CENTER_CUTS: usize = 8;
+
+/// Every item of `ASDCP::MXF::RGBAEssenceDescriptor` and its base classes
+/// (C-compatible struct).
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct AsdcpRgbaEssenceDescriptor {
+    pub instance_id: [u8; 16],
+    pub has_generation_id: c_int,
+    pub generation_id: [u8; 16],
+
+    pub locator_count: u32,
+    pub locators: [[u8; 16]; ASDCP_MAX_LOCATORS],
+    pub sub_descriptor_count: u32,
+    pub sub_descriptors: [[u8; 16]; ASDCP_MAX_SUB_DESCRIPTORS],
+
+    pub has_linked_track_id: c_int,
+    pub linked_track_id: u32,
+    pub sample_rate: AsdcpRational,
+    pub has_container_duration: c_int,
+    pub container_duration: u64,
+    pub essence_container: [u8; 16],
+    pub has_codec: c_int,
+    pub codec: [u8; 16],
+
+    pub has_signal_standard: c_int,
+    pub signal_standard: u8,
+    pub frame_layout: u8,
+    pub stored_width: u32,
+    pub stored_height: u32,
+    pub has_stored_f2_offset: c_int,
+    pub stored_f2_offset: u32,
+    pub has_sampled_width: c_int,
+    pub sampled_width: u32,
+    pub has_sampled_height: c_int,
+    pub sampled_height: u32,
+    pub has_sampled_x_offset: c_int,
+    pub sampled_x_offset: u32,
+    pub has_sampled_y_offset: c_int,
+    pub sampled_y_offset: u32,
+    pub has_display_height: c_int,
+    pub display_height: u32,
+    pub has_display_width: c_int,
+    pub display_width: u32,
+    pub has_display_x_offset: c_int,
+    pub display_x_offset: u32,
+    pub has_display_y_offset: c_int,
+    pub display_y_offset: u32,
+    pub has_display_f2_offset: c_int,
+    pub display_f2_offset: u32,
+    pub aspect_ratio: AsdcpRational,
+    pub has_active_format_descriptor: c_int,
+    pub active_format_descriptor: u8,
+    pub has_alpha_transparency: c_int,
+    pub alpha_transparency: u8,
+    pub has_image_alignment_offset: c_int,
+    pub image_alignment_offset: u32,
+    pub has_image_start_offset: c_int,
+    pub image_start_offset: u32,
+    pub has_image_end_offset: c_int,
+    pub image_end_offset: u32,
+    pub has_field_dominance: c_int,
+    pub field_dominance: u8,
+    pub picture_essence_coding: [u8; 16],
+    pub has_coding_equations: c_int,
+    pub coding_equations: [u8; 16],
+    pub alternative_center_cut_count: u32,
+    pub alternative_center_cuts: [[u8; 16]; ASDCP_MAX_ALTERNATIVE_CENTER_CUTS],
+    pub has_active_width: c_int,
+    pub active_width: u32,
+    pub has_active_height: c_int,
+    pub active_height: u32,
+    pub has_active_x_offset: c_int,
+    pub active_x_offset: u32,
+    pub has_active_y_offset: c_int,
+    pub active_y_offset: u32,
+    pub has_video_line_map: c_int,
+    pub video_line_map: [u32; 2],
+    pub hdr: AsdcpHdrMetadata,
+
+    pub has_component_max_ref: c_int,
+    pub component_max_ref: u32,
+    pub has_component_min_ref: c_int,
+    pub component_min_ref: u32,
+    pub has_alpha_min_ref: c_int,
+    pub alpha_min_ref: u32,
+    pub has_alpha_max_ref: c_int,
+    pub alpha_max_ref: u32,
+    pub has_scanning_direction: c_int,
+    pub scanning_direction: u8,
+    pub pixel_layout: [u8; 16],
+}
+
+/// Capacity of each raw marker segment on [`AsdcpJpeg2000SubDescriptor`].
+pub const ASDCP_DESCRIPTOR_RAW_CAPACITY: usize = ASDCP_JP2K_MAX_QUANTIZATION_STEPS + 1;
+
+/// Mirrors of `ASDCP::JP2K::MaxPRFN` and `MaxCPFN`.
+pub const ASDCP_JP2K_MAX_PROFILES: usize = 4;
+
+/// Every item of `ASDCP::MXF::JPEG2000PictureSubDescriptor` (C-compatible struct).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpJpeg2000SubDescriptor {
+    pub instance_id: [u8; 16],
+    pub has_generation_id: c_int,
+    pub generation_id: [u8; 16],
+
+    pub rsize: u16,
+    pub xsize: u32,
+    pub ysize: u32,
+    pub x_osize: u32,
+    pub y_osize: u32,
+    pub xt_size: u32,
+    pub yt_size: u32,
+    pub xt_osize: u32,
+    pub yt_osize: u32,
+    pub csize: u16,
+
+    pub has_picture_component_sizing: c_int,
+    pub picture_component_sizing_length: u32,
+    pub picture_component_sizing: [u8; ASDCP_DESCRIPTOR_RAW_CAPACITY],
+    pub has_coding_style_default: c_int,
+    pub coding_style_default_length: u32,
+    pub coding_style_default: [u8; ASDCP_DESCRIPTOR_RAW_CAPACITY],
+    pub has_quantization_default: c_int,
+    pub quantization_default_length: u32,
+    pub quantization_default: [u8; ASDCP_DESCRIPTOR_RAW_CAPACITY],
+
+    pub has_j2c_layout: c_int,
+    pub j2c_layout: [u8; 16],
+
+    pub has_extended_capabilities: c_int,
+    pub pcap: u32,
+    pub capability_count: u32,
+    pub ccap: [u16; ASDCP_JP2K_MAX_CAPABILITIES],
+    pub has_profile: c_int,
+    pub profile_count: u32,
+    pub profile: [u16; ASDCP_JP2K_MAX_PROFILES],
+    pub has_corresponding_profile: c_int,
+    pub corresponding_profile_count: u32,
+    pub corresponding_profile: [u16; ASDCP_JP2K_MAX_PROFILES],
+}
+
 /// Capacity of each string field in [`AsdcpMcaLabel`], including the terminator.
 pub const ASDCP_MCA_STRING_CAPACITY: usize = 129;
 
@@ -689,6 +835,14 @@ unsafe extern "C" {
     pub fn asdcp_as02_jp2k_reader_read_rgba_descriptor(
         r: *mut AsdcpAs02Jp2kReader,
         out: *mut AsdcpRgbaDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_read_rgba_essence_descriptor(
+        r: *mut AsdcpAs02Jp2kReader,
+        out: *mut AsdcpRgbaEssenceDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_read_jpeg2000_sub_descriptor(
+        r: *mut AsdcpAs02Jp2kReader,
+        out: *mut AsdcpJpeg2000SubDescriptor,
     ) -> AsdcpResult;
     pub fn asdcp_as02_jp2k_reader_read_hdr(
         r: *mut AsdcpAs02Jp2kReader,
