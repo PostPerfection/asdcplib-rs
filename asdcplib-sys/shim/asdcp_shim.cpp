@@ -1681,7 +1681,10 @@ asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reade
         return result;
     }
     memset(out, 0, sizeof(*out));
-    out->has_picture_essence_coding = 1;
+    /* a descriptor carrying no PictureEssenceCoding leaves the UL nil */
+    const uint8_t nil_ul[ASDCP::SMPTE_UL_LENGTH] = { 0 };
+    out->has_picture_essence_coding =
+        memcmp(full.picture_essence_coding, nil_ul, ASDCP::SMPTE_UL_LENGTH) == 0 ? 0 : 1;
     memcpy(out->picture_essence_coding, full.picture_essence_coding, ASDCP::SMPTE_UL_LENGTH);
     memcpy(out->pixel_layout, full.pixel_layout, ASDCP::MXF::RGBAValueLength);
     out->has_component_max_ref = full.has_component_max_ref;
