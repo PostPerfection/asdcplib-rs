@@ -1328,6 +1328,32 @@ void asdcp_jp2k_picture_essence_coding_for_rsize(uint16_t rsize, uint8_t* out_ul
     memcpy(out_ul, dict->ul(essence_coding_for_rsize(rsize)), ASDCP::SMPTE_UL_LENGTH);
 }
 
+/* RGBALayout component codes, in codestream component order for an RGB image
+   (MXFTypes.h RGBALayoutTable). */
+static const byte_t RGB_COMPONENT_CODES[ASDCP_JP2K_MAX_COMPONENTS] = { 'R', 'G', 'B' };
+
+/* SMPTE ST 377-1 puts 0 in the second entry for a progressive image, and a
+   full-frame image starts at line 1. This is the pair as-02-wrap writes when
+   given "-l 1,0" (as-02-wrap.cpp option -l at line 160, applied to the RGBA
+   descriptor at line 1130) and the pair a real IMF App 2 RGBA descriptor
+   carries. */
+static const ui32_t PROGRESSIVE_FULL_FRAME_LINE_MAP_FIRST = 1;
+static const ui32_t PROGRESSIVE_FULL_FRAME_LINE_MAP_SECOND = 0;
+
+/* One RGBALayout entry per codestream component, its code then its precision,
+   the remaining entries left as the terminator. */
+static bool j2c_layout_from_codestream(const asdcp_codestream_header_t* codestream, byte_t* out) {
+    if (codestream->csize == 0 || codestream->csize > ASDCP_JP2K_MAX_COMPONENTS) {
+        return false;
+    }
+    memset(out, 0, ASDCP::MXF::RGBAValueLength);
+    for (uint16_t i = 0; i < codestream->csize; ++i) {
+        out[i * 2] = RGB_COMPONENT_CODES[i];
+        out[i * 2 + 1] = (codestream->image_components[i].ssize & SSIZE_DEPTH_MASK) + 1;
+    }
+    return true;
+}
+
 static const byte_t* rgb_pixel_layout_for_depth(uint8_t depth) {
     switch (depth) {
         case 8:  return ASDCP::MXF::RGBAValue_RGB_8;
@@ -1376,7 +1402,8 @@ static asdcp_result_t as02_jp2k_open_write(asdcp_as02_jp2k_writer_t w, const cha
     const uint8_t component_depth =
         (desc->codestream.image_components[0].ssize & SSIZE_DEPTH_MASK) + 1;
     const byte_t* pixel_layout = rgb_pixel_layout_for_depth(component_depth);
-    if (pixel_layout == 0) {
+    byte_t j2c_layout[ASDCP::MXF::RGBAValueLength];
+    if (pixel_layout == 0 || !j2c_layout_from_codestream(&desc->codestream, j2c_layout)) {
         delete ed;
         for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
             delete *i;
@@ -1390,6 +1417,10 @@ static asdcp_result_t as02_jp2k_open_write(asdcp_as02_jp2k_writer_t w, const cha
     ed->PixelLayout = ASDCP::MXF::RGBALayout(pixel_layout);
     ed->ComponentMaxRef = (1u << component_depth) - 1;
     ed->ComponentMinRef = 0;
+    ed->VideoLineMap = ASDCP::MXF::LineMapPair(PROGRESSIVE_FULL_FRAME_LINE_MAP_FIRST,
+        PROGRESSIVE_FULL_FRAME_LINE_MAP_SECOND);
+    static_cast<ASDCP::MXF::JPEG2000PictureSubDescriptor*>(subs.back())->J2CLayout =
+        ASDCP::MXF::RGBALayout(j2c_layout);
 
     if (hdr != 0) {
         apply_hdr_metadata(ed, hdr);
