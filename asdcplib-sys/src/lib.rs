@@ -395,6 +395,26 @@ pub struct AsdcpMcaLabel {
     pub spoken_language: [u8; ASDCP_MCA_STRING_CAPACITY],
     pub has_soundfield_group_link_id: c_int,
     pub soundfield_group_link_id: [u8; 16],
+    pub has_title: c_int,
+    pub title: [u8; ASDCP_MCA_STRING_CAPACITY],
+    pub has_title_version: c_int,
+    pub title_version: [u8; ASDCP_MCA_STRING_CAPACITY],
+    pub has_audio_content_kind: c_int,
+    pub audio_content_kind: [u8; ASDCP_MCA_STRING_CAPACITY],
+    pub has_audio_element_kind: c_int,
+    pub audio_element_kind: [u8; ASDCP_MCA_STRING_CAPACITY],
+}
+
+/// The four MCALabelSubDescriptor items ST 2067-2 requires on an IMF
+/// SoundfieldGroupLabelSubDescriptor (C-compatible struct).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpSoundfieldGroupProperties {
+    pub language: *const c_char,
+    pub title: *const c_char,
+    pub title_version: *const c_char,
+    pub audio_content_kind: *const c_char,
+    pub audio_element_kind: *const c_char,
 }
 
 /// Essence type enum (mirrors ASDCP::EssenceType_t).
@@ -878,7 +898,7 @@ unsafe extern "C" {
         info: *const AsdcpWriterInfo,
         desc: *const AsdcpAudioDescriptor,
         mca_config: *const c_char,
-        mca_language: *const c_char,
+        soundfield_group: *const AsdcpSoundfieldGroupProperties,
         header_size: u32,
     ) -> AsdcpResult;
     pub fn asdcp_as02_pcm_writer_write_frame(

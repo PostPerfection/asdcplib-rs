@@ -808,6 +808,22 @@ static asdcp_result_t fill_mca_label(const std::list<ASDCP::MXF::InterchangeObje
         out_label->has_spoken_language = 1;
         copy_mca_string(label->RFC5646SpokenLanguage.const_get(), out_label->spoken_language);
     }
+    if (!label->MCATitle.empty()) {
+        out_label->has_title = 1;
+        copy_mca_string(label->MCATitle.const_get(), out_label->title);
+    }
+    if (!label->MCATitleVersion.empty()) {
+        out_label->has_title_version = 1;
+        copy_mca_string(label->MCATitleVersion.const_get(), out_label->title_version);
+    }
+    if (!label->MCAAudioContentKind.empty()) {
+        out_label->has_audio_content_kind = 1;
+        copy_mca_string(label->MCAAudioContentKind.const_get(), out_label->audio_content_kind);
+    }
+    if (!label->MCAAudioElementKind.empty()) {
+        out_label->has_audio_element_kind = 1;
+        copy_mca_string(label->MCAAudioElementKind.const_get(), out_label->audio_element_kind);
+    }
     ASDCP::MXF::AudioChannelLabelSubDescriptor* channel =
         dynamic_cast<ASDCP::MXF::AudioChannelLabelSubDescriptor*>(*li);
     if (channel != 0 && !channel->SoundfieldGroupLinkID.empty()) {
@@ -1830,13 +1846,43 @@ asdcp_result_t asdcp_as02_pcm_writer_open_write(asdcp_as02_pcm_writer_t w, const
         std::string(filename), wi, fd, subs, ad.EditRate, header_size).Value();
 }
 
+/* Set ST 2067-2 5.3.6.5's four items on the one SoundfieldGroupLabelSubDescriptor
+   the config produced. Fails when the config named no soundfield group or more
+   than one, which an IMF audio track cannot have. */
+static bool set_soundfield_group_properties(ASDCP::MXF::InterchangeObject_list_t& subs,
+    const asdcp_soundfield_group_properties_t* properties) {
+    ASDCP::MXF::SoundfieldGroupLabelSubDescriptor* group = 0;
+    for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
+        ASDCP::MXF::SoundfieldGroupLabelSubDescriptor* candidate =
+            dynamic_cast<ASDCP::MXF::SoundfieldGroupLabelSubDescriptor*>(*i);
+        if (candidate == 0) {
+            continue;
+        }
+        if (group != 0) {
+            return false;
+        }
+        group = candidate;
+    }
+    if (group == 0) {
+        return false;
+    }
+    group->MCATitle = ASDCP::MXF::UTF16String(std::string(properties->title));
+    group->MCATitleVersion = ASDCP::MXF::UTF16String(std::string(properties->title_version));
+    group->MCAAudioContentKind =
+        ASDCP::MXF::UTF16String(std::string(properties->audio_content_kind));
+    group->MCAAudioElementKind =
+        ASDCP::MXF::UTF16String(std::string(properties->audio_element_kind));
+    return true;
+}
+
 /* Open an AS-02 PCM MXF with MCA label subdescriptors. Mirrors
    asdcp_pcm_writer_open_write_mca, but the AS-02 OpenWrite already takes the
    subdescriptor list and links it, and the ChannelAssignment is the IMF UL
    rather than the d-cinema one. */
 asdcp_result_t asdcp_as02_pcm_writer_open_write_mca(asdcp_as02_pcm_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc,
-    const char* mca_config, const char* mca_language, uint32_t header_size) {
+    const char* mca_config,
+    const asdcp_soundfield_group_properties_t* soundfield_group, uint32_t header_size) {
     const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
 
     ASDCP::WriterInfo wi;
@@ -1849,10 +1895,7 @@ asdcp_result_t asdcp_as02_pcm_writer_open_write_mca(asdcp_as02_pcm_writer_t w, c
     /* AS02_MCAConfigParser is the ASDCP one plus the IMF-only symbols, ST and
        51EX among them, which an IMF audio track needs. */
     ASDCP::MXF::AS02_MCAConfigParser mca(dict);
-    const bool decoded = (mca_language == 0 || mca_language[0] == '\0')
-        ? mca.DecodeString(std::string(mca_config))
-        : mca.DecodeString(std::string(mca_config), std::string(mca_language));
-    if (!decoded) {
+    if (!mca.DecodeString(std::string(mca_config), std::string(soundfield_group->language))) {
         return ASDCP::RESULT_FORMAT.Value();
     }
 
@@ -1860,6 +1903,9 @@ asdcp_result_t asdcp_as02_pcm_writer_open_write_mca(asdcp_as02_pcm_writer_t w, c
     ASDCP::MXF::WaveAudioDescriptor* ed = new ASDCP::MXF::WaveAudioDescriptor(dict);
     ASDCP::Result_t result = ASDCP::PCM_ADesc_to_MD(ad, ed);
     if (ASDCP_SUCCESS(result) && mca.ChannelCount() != ed->ChannelCount) {
+        result = ASDCP::RESULT_FORMAT;
+    }
+    if (ASDCP_SUCCESS(result) && !set_soundfield_group_properties(subs, soundfield_group)) {
         result = ASDCP::RESULT_FORMAT;
     }
     if (ASDCP_FAILURE(result)) {

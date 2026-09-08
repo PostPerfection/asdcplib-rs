@@ -1946,13 +1946,22 @@ mod as02_pcm_tests {
         }
     }
 
+    /// The four ST 2067-2 5.3.6.5 items the tests write on the soundfield group.
+    const SOUNDFIELD_GROUP: SoundfieldGroupProperties = SoundfieldGroupProperties {
+        language: "en-US",
+        title: "Sol Levante",
+        title_version: "Original Version",
+        audio_content_kind: "PRM",
+        audio_element_kind: "FCMP",
+    };
+
     /// Write one clip-wrapped frame of labelled PCM, then read the
     /// ChannelAssignment and every MCA label subdescriptor back out.
     fn write_and_read_mca(
         tag: &str,
         channel_count: u32,
         mca_config: &str,
-        mca_language: Option<&str>,
+        language: &str,
     ) -> (Option<[u8; 16]>, Vec<McaLabelSubDescriptor>) {
         let path = crate::util::temp_path(tag);
         let path_string = path.to_string_lossy().to_string();
@@ -1968,7 +1977,10 @@ mod as02_pcm_tests {
                     &WriterInfo::default(),
                     &descriptor,
                     mca_config,
-                    mca_language,
+                    &SoundfieldGroupProperties {
+                        language,
+                        ..SOUNDFIELD_GROUP
+                    },
                     16_384,
                 )
                 .unwrap();
@@ -1992,8 +2004,7 @@ mod as02_pcm_tests {
     /// back to that group.
     #[test]
     fn test_as02_pcm_mca_stereo_roundtrip() {
-        let (assignment, labels) =
-            write_and_read_mca("as02-pcm-mca-stereo", 2, "ST(L,R)", Some("de-DE"));
+        let (assignment, labels) = write_and_read_mca("as02-pcm-mca-stereo", 2, "ST(L,R)", "de-DE");
 
         assert_eq!(assignment, Some(IMF_CHANNEL_ASSIGNMENT_MCA));
         assert_eq!(labels.len(), 3);
@@ -2002,6 +2013,7 @@ mod as02_pcm_tests {
         assert_eq!(group.kind, McaLabelKind::SoundfieldGroup);
         assert_eq!(group.tag_symbol, "sgST");
         assert_eq!(group.spoken_language.as_deref(), Some("de-DE"));
+        assert_soundfield_group_properties(group);
 
         let channels = &labels[1..];
         assert_eq!(channels.len(), 2);
@@ -2019,7 +2031,7 @@ mod as02_pcm_tests {
     #[test]
     fn test_as02_pcm_mca_51_roundtrip() {
         let (assignment, labels) =
-            write_and_read_mca("as02-pcm-mca-51", 6, "51(L,R,C,LFE,Ls,Rs)", Some("en-US"));
+            write_and_read_mca("as02-pcm-mca-51", 6, "51(L,R,C,LFE,Ls,Rs)", "en-US");
 
         assert_eq!(assignment, Some(IMF_CHANNEL_ASSIGNMENT_MCA));
         assert_eq!(labels.len(), 7);
@@ -2028,6 +2040,7 @@ mod as02_pcm_tests {
         assert_eq!(group.kind, McaLabelKind::SoundfieldGroup);
         assert_eq!(group.tag_symbol, "sg51");
         assert_eq!(group.spoken_language.as_deref(), Some("en-US"));
+        assert_soundfield_group_properties(group);
 
         let symbols = ["chL", "chR", "chC", "chLFE", "chLs", "chRs"];
         assert_eq!(labels[1..].len(), symbols.len());
@@ -2038,6 +2051,85 @@ mod as02_pcm_tests {
             assert_eq!(channel.channel_id, Some(index as u32 + 1));
             assert_eq!(channel.soundfield_group_link_id, Some(group.link_id));
         }
+    }
+
+    /// Photon fails a track file whose soundfield group leaves any of the four
+    /// items empty, so all four have to survive the write.
+    fn assert_soundfield_group_properties(group: &McaLabelSubDescriptor) {
+        assert_eq!(group.title.as_deref(), Some(SOUNDFIELD_GROUP.title));
+        assert_eq!(
+            group.title_version.as_deref(),
+            Some(SOUNDFIELD_GROUP.title_version)
+        );
+        assert_eq!(
+            group.audio_content_kind.as_deref(),
+            Some(SOUNDFIELD_GROUP.audio_content_kind)
+        );
+        assert_eq!(
+            group.audio_element_kind.as_deref(),
+            Some(SOUNDFIELD_GROUP.audio_element_kind)
+        );
+    }
+
+    /// The four items go on the soundfield group only, never on a channel label.
+    #[test]
+    fn test_as02_pcm_mca_channel_labels_carry_no_group_properties() {
+        let (_, labels) =
+            write_and_read_mca("as02-pcm-mca-channel-properties", 2, "ST(L,R)", "en-US");
+
+        for channel in &labels[1..] {
+            assert_eq!(channel.kind, McaLabelKind::AudioChannel);
+            assert_eq!(channel.title, None);
+            assert_eq!(channel.title_version, None);
+            assert_eq!(channel.audio_content_kind, None);
+            assert_eq!(channel.audio_element_kind, None);
+        }
+    }
+
+    /// An empty item is refused before anything is written, since Photon reads
+    /// an empty string as missing.
+    #[test]
+    fn test_as02_pcm_mca_empty_group_property_fails() {
+        let path = crate::util::temp_path("as02-pcm-mca-empty-property");
+        let path_string = path.to_string_lossy().to_string();
+        let mut writer = MxfWriter::new();
+        assert!(
+            writer
+                .open_write_mca(
+                    &path_string,
+                    &WriterInfo::default(),
+                    &mca_descriptor(2),
+                    "ST(L,R)",
+                    &SoundfieldGroupProperties {
+                        audio_element_kind: "",
+                        ..SOUNDFIELD_GROUP
+                    },
+                    16_384,
+                )
+                .is_err()
+        );
+        assert!(!path.exists());
+    }
+
+    /// A config naming no soundfield group cannot carry the four items, so it is
+    /// refused rather than written without them.
+    #[test]
+    fn test_as02_pcm_mca_without_soundfield_group_fails() {
+        let path = crate::util::temp_path("as02-pcm-mca-no-group");
+        let path_string = path.to_string_lossy().to_string();
+        let mut writer = MxfWriter::new();
+        assert!(
+            writer
+                .open_write_mca(
+                    &path_string,
+                    &WriterInfo::default(),
+                    &mca_descriptor(2),
+                    "L,R",
+                    &SOUNDFIELD_GROUP,
+                    16_384,
+                )
+                .is_err()
+        );
     }
 
     /// A config naming a different number of channels than the descriptor is
@@ -2054,7 +2146,7 @@ mod as02_pcm_tests {
                     &WriterInfo::default(),
                     &mca_descriptor(6),
                     "ST(L,R)",
-                    None,
+                    &SOUNDFIELD_GROUP,
                     16_384,
                 )
                 .is_err()

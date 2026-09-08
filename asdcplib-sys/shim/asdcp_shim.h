@@ -348,7 +348,27 @@ typedef struct {
     char spoken_language[ASDCP_MCA_STRING_CAPACITY];
     int32_t has_soundfield_group_link_id;
     uint8_t soundfield_group_link_id[16];
+    int32_t has_title;
+    char title[ASDCP_MCA_STRING_CAPACITY];
+    int32_t has_title_version;
+    char title_version[ASDCP_MCA_STRING_CAPACITY];
+    int32_t has_audio_content_kind;
+    char audio_content_kind[ASDCP_MCA_STRING_CAPACITY];
+    int32_t has_audio_element_kind;
+    char audio_element_kind[ASDCP_MCA_STRING_CAPACITY];
 } asdcp_mca_label_t;
+
+/* The MCALabelSubDescriptor items ST 2067-2 section 5.3.6.5 requires on an IMF
+   SoundfieldGroupLabelSubDescriptor. language is the RFC 5646 code every label
+   the config produces carries; the other four are free text drawn from no
+   registry. All five must be non-empty. */
+typedef struct {
+    const char* language;
+    const char* title;
+    const char* title_version;
+    const char* audio_content_kind;
+    const char* audio_element_kind;
+} asdcp_soundfield_group_properties_t;
 
 typedef void* asdcp_jp2k_writer_t;
 typedef void* asdcp_jp2k_reader_t;
@@ -609,11 +629,13 @@ asdcp_result_t asdcp_as02_pcm_writer_open_write(asdcp_as02_pcm_writer_t w, const
     const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc, uint32_t header_size);
 /* Open an AS-02 PCM MXF with SMPTE 377-4 MCA label subdescriptors parsed from an
    as-02-wrap style config string, e.g. "ST(L,R)" or "51(L,R,C,LFE,Ls,Rs)", and
-   set the IMF MCA ChannelAssignment UL. mca_language is the RFC 5646 code the
-   labels carry, asdcplib's en-US default when null or empty. */
+   set the IMF MCA ChannelAssignment UL. soundfield_group carries the language
+   for every label and the four items that go on the one
+   SoundfieldGroupLabelSubDescriptor the config produced. */
 asdcp_result_t asdcp_as02_pcm_writer_open_write_mca(asdcp_as02_pcm_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_audio_descriptor_t* desc,
-    const char* mca_config, const char* mca_language, uint32_t header_size);
+    const char* mca_config,
+    const asdcp_soundfield_group_properties_t* soundfield_group, uint32_t header_size);
 asdcp_result_t asdcp_as02_pcm_writer_write_frame(asdcp_as02_pcm_writer_t w,
     const uint8_t* frame_data, uint32_t frame_size,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);

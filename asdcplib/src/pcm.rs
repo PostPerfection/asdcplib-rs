@@ -323,6 +323,14 @@ pub struct McaLabelSubDescriptor {
     /// SoundfieldGroupLinkID, the [`link_id`](Self::link_id) of the soundfield
     /// group this channel belongs to.
     pub soundfield_group_link_id: Option<[u8; 16]>,
+    /// MCATitle, free text naming the work this audio belongs to.
+    pub title: Option<String>,
+    /// MCATitleVersion, free text naming the version of that work.
+    pub title_version: Option<String>,
+    /// MCAAudioContentKind, free text, for example `"PRM"`.
+    pub audio_content_kind: Option<String>,
+    /// MCAAudioElementKind, free text, for example `"FCMP"`.
+    pub audio_element_kind: Option<String>,
 }
 
 impl McaLabelSubDescriptor {
@@ -344,6 +352,16 @@ impl McaLabelSubDescriptor {
             soundfield_group_link_id: optional(
                 ffi.has_soundfield_group_link_id,
                 ffi.soundfield_group_link_id,
+            ),
+            title: optional(ffi.has_title, mca_string(&ffi.title)?),
+            title_version: optional(ffi.has_title_version, mca_string(&ffi.title_version)?),
+            audio_content_kind: optional(
+                ffi.has_audio_content_kind,
+                mca_string(&ffi.audio_content_kind)?,
+            ),
+            audio_element_kind: optional(
+                ffi.has_audio_element_kind,
+                mca_string(&ffi.audio_element_kind)?,
             ),
         })
     }

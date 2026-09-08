@@ -482,6 +482,57 @@ pub mod pcm {
         0x00,
     ];
 
+    /// What ST 2067-2 section 5.3.6.5 requires on the one
+    /// SoundfieldGroupLabelSubDescriptor of an IMF audio track: the spoken
+    /// language plus MCATitle, MCATitleVersion, MCAAudioContentKind and
+    /// MCAAudioElementKind. The last four are free text drawn from no registry.
+    /// All five must be non-empty: [`MxfWriter::open_write_mca`] rejects an
+    /// empty one rather than writing a file a validator will fail.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct SoundfieldGroupProperties<'a> {
+        /// RFC5646SpokenLanguage, for example `"en-US"`. Every label the config
+        /// produces carries it, but only this one is read by a validator.
+        pub language: &'a str,
+        /// The work this audio belongs to, for example `"Sol Levante"`.
+        pub title: &'a str,
+        /// The version of that work, for example `"Original Version"`.
+        pub title_version: &'a str,
+        /// For example `"PRM"` for a primary mix.
+        pub audio_content_kind: &'a str,
+        /// For example `"FCMP"` for a final complete mix.
+        pub audio_element_kind: &'a str,
+    }
+
+    /// Order of the fields as the shim struct takes them.
+    const SOUNDFIELD_GROUP_PROPERTY_COUNT: usize = 5;
+
+    impl SoundfieldGroupProperties<'_> {
+        fn to_cstrings(&self) -> Result<[CString; SOUNDFIELD_GROUP_PROPERTY_COUNT]> {
+            let fields = [
+                self.language,
+                self.title,
+                self.title_version,
+                self.audio_content_kind,
+                self.audio_element_kind,
+            ];
+            if fields.iter().any(|field| field.is_empty()) {
+                return Err(crate::Error::InvalidArgument(
+                    "empty soundfield group property",
+                ));
+            }
+            fields
+                .into_iter()
+                .map(|field| {
+                    CString::new(field).map_err(|_| {
+                        crate::Error::InvalidArgument("null byte in soundfield group property")
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?
+                .try_into()
+                .map_err(|_| crate::Error::InvalidArgument("soundfield group property count"))
+        }
+    }
+
     /// AS-02 PCM MXF writer.
     pub struct MxfWriter {
         ptr: *mut asdcplib_sys::AsdcpAs02PcmWriter,
@@ -531,31 +582,30 @@ pub mod pcm {
         /// IMF MCA ChannelAssignment UL ([`IMF_CHANNEL_ASSIGNMENT_MCA`]).
         ///
         /// `mca_config` is an as-02-wrap style config string, for example
-        /// `"ST(L,R)"` or `"51(L,R,C,LFE,Ls,Rs)"`. Its channel count must match
-        /// the descriptor's or the call fails.
-        ///
-        /// `mca_language` is the RFC 5646 code the SoundfieldGroupLabelSubDescriptor
-        /// carries, asdcplib's default `en-US` when `None`.
+        /// `"ST(L,R)"` or `"51(L,R,C,LFE,Ls,Rs)"`. It has to name exactly one
+        /// soundfield group, and its channel count must match the descriptor's,
+        /// or the call fails.
         pub fn open_write_mca(
             &mut self,
             filename: &str,
             info: &WriterInfo,
             desc: &AudioDescriptor,
             mca_config: &str,
-            mca_language: Option<&str>,
+            soundfield_group: &SoundfieldGroupProperties,
             header_size: u32,
         ) -> Result<()> {
             let cstr = CString::new(filename)
                 .map_err(|_| crate::Error::InvalidArgument("null byte in filename"))?;
             let mca = CString::new(mca_config)
                 .map_err(|_| crate::Error::InvalidArgument("null byte in mca config"))?;
-            let language = mca_language
-                .map(CString::new)
-                .transpose()
-                .map_err(|_| crate::Error::InvalidArgument("null byte in mca language"))?;
-            let language_ptr = language
-                .as_ref()
-                .map_or(std::ptr::null(), |value| value.as_ptr());
+            let properties = soundfield_group.to_cstrings()?;
+            let ffi_properties = asdcplib_sys::AsdcpSoundfieldGroupProperties {
+                language: properties[0].as_ptr(),
+                title: properties[1].as_ptr(),
+                title_version: properties[2].as_ptr(),
+                audio_content_kind: properties[3].as_ptr(),
+                audio_element_kind: properties[4].as_ptr(),
+            };
             let ffi_info = info.to_ffi();
             let ffi_desc = desc.to_ffi();
             error::check(unsafe {
@@ -565,7 +615,7 @@ pub mod pcm {
                     &ffi_info,
                     &ffi_desc,
                     mca.as_ptr(),
-                    language_ptr,
+                    &ffi_properties,
                     header_size,
                 )
             })
