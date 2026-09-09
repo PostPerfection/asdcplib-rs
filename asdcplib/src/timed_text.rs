@@ -11,6 +11,11 @@ pub struct TimedTextDescriptor {
     pub edit_rate: Rational,
     pub container_duration: u32,
     pub asset_id: [u8; 16],
+    /// The IMSC profile designator the descriptor's NamespaceURI carries. Empty
+    /// when unset, which is what asdcplib wrote before this field existed.
+    pub namespace_uri: String,
+    /// The descriptor's UCSEncoding, e.g. `UTF-8`.
+    pub ucs_encoding: String,
 }
 
 impl TimedTextDescriptor {
@@ -19,6 +24,8 @@ impl TimedTextDescriptor {
             edit_rate: self.edit_rate.to_ffi(),
             container_duration: self.container_duration,
             asset_id: self.asset_id,
+            namespace_uri: fixed_string_to_ffi(&self.namespace_uri),
+            ucs_encoding: fixed_string_to_ffi(&self.ucs_encoding),
         }
     }
 
@@ -27,8 +34,25 @@ impl TimedTextDescriptor {
             edit_rate: Rational::from_ffi(&ffi.edit_rate),
             container_duration: ffi.container_duration,
             asset_id: ffi.asset_id,
+            namespace_uri: fixed_string_from_ffi(&ffi.namespace_uri),
+            ucs_encoding: fixed_string_from_ffi(&ffi.ucs_encoding),
         }
     }
+}
+
+/// A String into the shim's NUL-terminated fixed buffer, truncated to fit.
+fn fixed_string_to_ffi(value: &str) -> [u8; asdcplib_sys::ASDCP_TIMED_TEXT_STRING_CAPACITY] {
+    let mut buffer = [0u8; asdcplib_sys::ASDCP_TIMED_TEXT_STRING_CAPACITY];
+    let bytes = value.as_bytes();
+    let length = bytes.len().min(buffer.len() - 1);
+    buffer[..length].copy_from_slice(&bytes[..length]);
+    buffer
+}
+
+/// The shim's NUL-terminated fixed buffer back to a String.
+fn fixed_string_from_ffi(bytes: &[u8]) -> String {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
 /// MIME category of a timed-text ancillary resource.

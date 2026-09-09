@@ -1194,6 +1194,8 @@ mod timed_text_tests {
             edit_rate: EDIT_RATE_24,
             container_duration: 96,
             asset_id: [5; 16],
+            namespace_uri: String::new(),
+            ucs_encoding: String::new(),
         };
         let mut writer = MxfWriter::new();
         writer
@@ -1252,6 +1254,8 @@ mod timed_text_tests {
             edit_rate: EDIT_RATE_24,
             container_duration: 96,
             asset_id: [5; 16],
+            namespace_uri: String::new(),
+            ucs_encoding: String::new(),
         };
         // stand-in font payload; the bytes only need to survive the round trip
         let font: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
@@ -2301,6 +2305,8 @@ mod as02_timed_text_tests {
             edit_rate: EDIT_RATE_24,
             container_duration: 96,
             asset_id: [5; 16],
+            namespace_uri: "http://www.w3.org/ns/ttml/profile/imsc1/text".to_string(),
+            ucs_encoding: "UTF-8".to_string(),
         };
 
         {
@@ -2325,6 +2331,11 @@ mod as02_timed_text_tests {
 
             let desc = reader.descriptor().unwrap();
             assert_eq!(desc.edit_rate, EDIT_RATE_24);
+            assert_eq!(
+                desc.namespace_uri,
+                "http://www.w3.org/ns/ttml/profile/imsc1/text"
+            );
+            assert_eq!(desc.ucs_encoding, "UTF-8");
 
             let read_info = reader.writer_info().unwrap();
             assert_eq!(read_info.asset_uuid, [4; 16]);

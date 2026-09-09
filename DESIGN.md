@@ -36,6 +36,10 @@ The AS-DCP writer sets its own `PictureEssenceCoding` and forces Rsize to 3 or 4
 
 Four items come from the writer rather than from the caller's `AudioDescriptor`: `SampleRate` is set to `AudioSamplingRate` and `ContainerDuration` counts samples, both because AS-02 PCM is clip-wrapped, `EssenceContainer` is the ST 382 clip-wrapped WAVE UL, and `LinkedTrackID` is 1, the only track in the file package. `SoundEssenceCoding` is mandatory in ST 377-1 and asdcplib never sets it, so it reads back nil.
 
+## Timed text descriptor
+
+`timed_text::TimedTextDescriptor` carries `namespace_uri` and `ucs_encoding` beside the edit rate, container duration and asset id. The writer stamps them into the MXF descriptor's `NamespaceURI` and `UCSEncoding`, and the reader reads them back, so an IMF caller can set the IMSC profile designator (e.g. `http://www.w3.org/ns/ttml/profile/imsc1/text`) that Photon requires and repeat it in the CPL EssenceDescriptorList. Both default to the empty string asdcplib wrote before, which Photon rejects.
+
 ## Testing
 
 65 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.

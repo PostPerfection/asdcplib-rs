@@ -186,6 +186,10 @@ pub struct AsdcpAudioDescriptor {
     pub channel_format: c_int,
 }
 
+/// Holds a timed-text NamespaceURI or UCSEncoding, NUL-terminated and truncated
+/// to fit. Mirrors `ASDCP_TIMED_TEXT_STRING_CAPACITY` in the shim.
+pub const ASDCP_TIMED_TEXT_STRING_CAPACITY: usize = 256;
+
 /// Timed text descriptor (C-compatible subset).
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -193,6 +197,8 @@ pub struct AsdcpTimedTextDescriptor {
     pub edit_rate: AsdcpRational,
     pub container_duration: u32,
     pub asset_id: [u8; 16],
+    pub namespace_uri: [u8; ASDCP_TIMED_TEXT_STRING_CAPACITY],
+    pub ucs_encoding: [u8; ASDCP_TIMED_TEXT_STRING_CAPACITY],
 }
 
 /// Atmos descriptor (C-compatible).

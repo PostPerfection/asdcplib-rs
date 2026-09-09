@@ -139,10 +139,16 @@ typedef struct {
     int32_t channel_format;
 } asdcp_audio_descriptor_t;
 
+/* Holds a timed-text NamespaceURI or UCSEncoding, NUL-terminated and truncated
+   to fit; an IMSC profile designator is well under this. */
+#define ASDCP_TIMED_TEXT_STRING_CAPACITY 256
+
 typedef struct {
     asdcp_rational_t edit_rate;
     uint32_t container_duration;
     uint8_t asset_id[16];
+    char namespace_uri[ASDCP_TIMED_TEXT_STRING_CAPACITY];
+    char ucs_encoding[ASDCP_TIMED_TEXT_STRING_CAPACITY];
 } asdcp_timed_text_descriptor_t;
 
 typedef struct {

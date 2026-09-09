@@ -207,10 +207,21 @@ static void cpp_to_c_audio_desc(const ASDCP::PCM::AudioDescriptor& cpp, asdcp_au
     c->channel_format = static_cast<int32_t>(cpp.ChannelFormat);
 }
 
+static void copy_timed_text_string(const std::string& src, char* dst) {
+    size_t length = src.size();
+    if (length > ASDCP_TIMED_TEXT_STRING_CAPACITY - 1) {
+        length = ASDCP_TIMED_TEXT_STRING_CAPACITY - 1;
+    }
+    memcpy(dst, src.data(), length);
+    dst[length] = 0;
+}
+
 static void c_to_cpp_timed_text_desc(const asdcp_timed_text_descriptor_t* c, ASDCP::TimedText::TimedTextDescriptor& cpp) {
     cpp.EditRate = ASDCP::Rational(c->edit_rate.numerator, c->edit_rate.denominator);
     cpp.ContainerDuration = c->container_duration;
     memcpy(cpp.AssetID, c->asset_id, 16);
+    cpp.NamespaceName = std::string(c->namespace_uri);
+    cpp.EncodingName = std::string(c->ucs_encoding);
 }
 
 static void cpp_to_c_timed_text_desc(const ASDCP::TimedText::TimedTextDescriptor& cpp, asdcp_timed_text_descriptor_t* c) {
@@ -218,6 +229,8 @@ static void cpp_to_c_timed_text_desc(const ASDCP::TimedText::TimedTextDescriptor
     c->edit_rate.denominator = cpp.EditRate.Denominator;
     c->container_duration = cpp.ContainerDuration;
     memcpy(c->asset_id, cpp.AssetID, 16);
+    copy_timed_text_string(cpp.NamespaceName, c->namespace_uri);
+    copy_timed_text_string(cpp.EncodingName, c->ucs_encoding);
 }
 
 static void c_to_cpp_atmos_desc(const asdcp_atmos_descriptor_t* c, ASDCP::ATMOS::AtmosDescriptor& cpp) {
