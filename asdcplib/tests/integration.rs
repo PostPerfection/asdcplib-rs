@@ -1463,6 +1463,41 @@ mod as02_jp2k_tests {
     /// SMPTE 377-1 ScanningDirection for left to right, top to bottom.
     const SCANNING_DIRECTION_LEFT_TO_RIGHT_TOP_TO_BOTTOM: u8 = 0;
 
+    const YUV_12_LAYOUT: [u8; 16] = [b'Y', 12, b'U', 12, b'V', 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    const COLOR_SITING_COSITED: u8 = 0;
+
+    const RESULT_FORMAT: i32 = -101;
+
+    fn assert_descriptor_absent<T: std::fmt::Debug>(result: asdcplib::Result<T>) {
+        match result {
+            Err(asdcplib::Error::AsdcpError(code)) => assert_eq!(code, RESULT_FORMAT),
+            other => panic!("expected the descriptor to be absent, got {other:?}"),
+        }
+    }
+
+    fn write_cdci_fixture(
+        path: &str,
+        fixture_name: &str,
+        chroma_subsampling: ChromaSubsampling,
+    ) -> Vec<u8> {
+        let frame = crate::util::fixture(fixture_name);
+        let mut writer = MxfWriter::new();
+        writer
+            .open_write_cdci(
+                path,
+                &WriterInfo::default(),
+                &descriptor_for(fixture_name, 1),
+                chroma_subsampling,
+                None,
+                16_384,
+            )
+            .unwrap();
+        writer.write_frame(&frame, None, None).unwrap();
+        writer.finalize().unwrap();
+        frame
+    }
+
     fn descriptor_for(fixture_name: &str, frames: u32) -> PictureDescriptor {
         let codestream = CodestreamHeader::parse(&crate::util::fixture(fixture_name)).unwrap();
         PictureDescriptor {
@@ -1818,6 +1853,104 @@ mod as02_jp2k_tests {
             &layout[written.codestream.components.len() * 2..],
             &[0u8; 10]
         );
+    }
+
+    #[test]
+    fn test_as02_jp2k_cdci_descriptor_444() {
+        let path = crate::util::temp_path("as02-jp2k-cdci-444");
+        let path_string = path.to_string_lossy().to_string();
+        let written = descriptor_for(crate::util::CINEMA_2K_FIXTURE, 1);
+        let frame = write_cdci_fixture(
+            &path_string,
+            crate::util::CINEMA_2K_FIXTURE,
+            ChromaSubsampling {
+                horizontal: 1,
+                vertical: 1,
+            },
+        );
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+
+        let cdci = reader.cdci_descriptor().unwrap();
+        assert_eq!(cdci.horizontal_subsampling, 1);
+        assert_eq!(cdci.vertical_subsampling, Some(1));
+        assert_eq!(
+            cdci.component_depth,
+            written.codestream.components[0].bit_depth() as u32
+        );
+        assert_eq!(cdci.color_siting, Some(COLOR_SITING_COSITED));
+        assert_eq!(
+            cdci.picture_essence_coding,
+            Some(PICTURE_ESSENCE_CODING_CINEMA_2K)
+        );
+
+        assert_descriptor_absent(reader.rgba_descriptor());
+
+        let sub = reader.jpeg2000_sub_descriptor().unwrap();
+        assert_eq!(sub.j2c_layout, Some(YUV_12_LAYOUT));
+
+        let read = reader.picture_descriptor().unwrap();
+        assert_eq!(read.codestream, written.codestream);
+
+        let mut buf = vec![0u8; frame.len()];
+        let size = reader.read_frame(0, &mut buf, None, None).unwrap();
+        assert_eq!(size, frame.len());
+        assert_eq!(&buf[..size], frame.as_slice());
+
+        reader.close().unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn test_as02_jp2k_cdci_descriptor_422() {
+        let path = crate::util::temp_path("as02-jp2k-cdci-422");
+        let path_string = path.to_string_lossy().to_string();
+        write_cdci_fixture(
+            &path_string,
+            crate::util::CINEMA_2K_FIXTURE,
+            ChromaSubsampling {
+                horizontal: 2,
+                vertical: 1,
+            },
+        );
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        let cdci = reader.cdci_descriptor().unwrap();
+        reader.close().unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(cdci.horizontal_subsampling, 2);
+        assert_eq!(cdci.vertical_subsampling, Some(1));
+    }
+
+    #[test]
+    fn test_as02_jp2k_cdci_descriptor_absent_on_rgba() {
+        let path = crate::util::temp_path("as02-jp2k-cdci-absent");
+        let path_string = path.to_string_lossy().to_string();
+        let frame = crate::util::fixture(crate::util::CINEMA_2K_FIXTURE);
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write(
+                    &path_string,
+                    &WriterInfo::default(),
+                    &descriptor_for(crate::util::CINEMA_2K_FIXTURE, 1),
+                    16_384,
+                )
+                .unwrap();
+            writer.write_frame(&frame, None, None).unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        assert!(reader.rgba_descriptor().is_ok());
+        assert_descriptor_absent(reader.cdci_descriptor());
+        reader.close().unwrap();
+        std::fs::remove_file(path).unwrap();
     }
 
     /// A plain AS-02 writer sets no HDR metadata, so every field reads back None.

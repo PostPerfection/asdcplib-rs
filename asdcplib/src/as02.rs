@@ -30,6 +30,24 @@ pub mod jp2k {
         pub component_min_ref: Option<u32>,
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ChromaSubsampling {
+        pub horizontal: u32,
+        pub vertical: u32,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct CdciDescriptor {
+        pub component_depth: u32,
+        pub horizontal_subsampling: u32,
+        pub vertical_subsampling: Option<u32>,
+        pub color_siting: Option<u8>,
+        pub picture_essence_coding: Option<[u8; 16]>,
+        pub color_primaries: Option<[u8; 16]>,
+        pub transfer_characteristic: Option<[u8; 16]>,
+        pub coding_equations: Option<[u8; 16]>,
+    }
+
     /// Every item of the MXF `RGBAEssenceDescriptor` an AS-02 JP2K picture track
     /// carries, including the ones its `FileDescriptor` and
     /// `GenericPictureEssenceDescriptor` bases define. An IMF CPL
@@ -305,6 +323,34 @@ pub mod jp2k {
             })
         }
 
+        pub fn open_write_cdci(
+            &mut self,
+            filename: &str,
+            info: &WriterInfo,
+            desc: &PictureDescriptor,
+            chroma_subsampling: ChromaSubsampling,
+            hdr: Option<&HdrMetadata>,
+            header_size: u32,
+        ) -> Result<()> {
+            let cstr = CString::new(filename)
+                .map_err(|_| crate::Error::InvalidArgument("null byte in filename"))?;
+            let ffi_info = info.to_ffi();
+            let ffi_desc = desc.to_ffi();
+            let ffi_hdr = hdr.map(|hdr| hdr.to_ffi());
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_jp2k_writer_open_write_cdci(
+                    self.ptr,
+                    cstr.as_ptr(),
+                    &ffi_info,
+                    &ffi_desc,
+                    ffi_hdr.as_ref().map_or(std::ptr::null(), |hdr| hdr),
+                    chroma_subsampling.horizontal,
+                    chroma_subsampling.vertical,
+                    header_size,
+                )
+            })
+        }
+
         pub fn write_frame(
             &mut self,
             frame_data: &[u8],
@@ -403,6 +449,32 @@ pub mod jp2k {
                 )
             })?;
             Ok(RgbaEssenceDescriptor::from_ffi(&ffi))
+        }
+
+        pub fn cdci_descriptor(&mut self) -> Result<CdciDescriptor> {
+            let mut ffi = unsafe { std::mem::zeroed::<asdcplib_sys::AsdcpCdciDescriptor>() };
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_jp2k_reader_read_cdci_descriptor(self.ptr, &mut ffi)
+            })?;
+            Ok(CdciDescriptor {
+                component_depth: ffi.component_depth,
+                horizontal_subsampling: ffi.horizontal_subsampling,
+                vertical_subsampling: optional(
+                    ffi.has_vertical_subsampling,
+                    ffi.vertical_subsampling,
+                ),
+                color_siting: optional(ffi.has_color_siting, ffi.color_siting),
+                picture_essence_coding: optional(
+                    ffi.has_picture_essence_coding,
+                    ffi.picture_essence_coding,
+                ),
+                color_primaries: optional(ffi.has_color_primaries, ffi.color_primaries),
+                transfer_characteristic: optional(
+                    ffi.has_transfer_characteristic,
+                    ffi.transfer_characteristic,
+                ),
+                coding_equations: optional(ffi.has_coding_equations, ffi.coding_equations),
+            })
         }
 
         /// Every item of the JPEG 2000 picture sub-descriptor the RGBA essence

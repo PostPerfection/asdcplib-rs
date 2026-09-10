@@ -127,6 +127,23 @@ typedef struct {
 } asdcp_rgba_descriptor_t;
 
 typedef struct {
+    uint32_t component_depth;
+    uint32_t horizontal_subsampling;
+    int32_t has_vertical_subsampling;
+    uint32_t vertical_subsampling;
+    int32_t has_color_siting;
+    uint8_t color_siting;
+    int32_t has_picture_essence_coding;
+    uint8_t picture_essence_coding[16];
+    int32_t has_color_primaries;
+    uint8_t color_primaries[16];
+    int32_t has_transfer_characteristic;
+    uint8_t transfer_characteristic[16];
+    int32_t has_coding_equations;
+    uint8_t coding_equations[16];
+} asdcp_cdci_descriptor_t;
+
+typedef struct {
     asdcp_rational_t edit_rate;
     asdcp_rational_t audio_sampling_rate;
     uint32_t locked;
@@ -651,6 +668,10 @@ asdcp_result_t asdcp_as02_jp2k_writer_open_write(asdcp_as02_jp2k_writer_t w, con
 asdcp_result_t asdcp_as02_jp2k_writer_open_write_hdr(asdcp_as02_jp2k_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
     const asdcp_hdr_metadata_t* hdr, uint32_t header_size);
+asdcp_result_t asdcp_as02_jp2k_writer_open_write_cdci(asdcp_as02_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const asdcp_hdr_metadata_t* hdr, uint32_t horizontal_subsampling,
+    uint32_t vertical_subsampling, uint32_t header_size);
 asdcp_result_t asdcp_as02_jp2k_writer_write_frame(asdcp_as02_jp2k_writer_t w,
     const uint8_t* frame_data, uint32_t frame_size,
     asdcp_aes_enc_context_t enc_ctx, asdcp_hmac_context_t hmac_ctx);
@@ -670,6 +691,8 @@ asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reade
    CPL EssenceDescriptorList. */
 asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_essence_descriptor(asdcp_as02_jp2k_reader_t r,
     asdcp_rgba_essence_descriptor_t* out);
+asdcp_result_t asdcp_as02_jp2k_reader_read_cdci_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_cdci_descriptor_t* out);
 /* Read every item of the JPEG2000PictureSubDescriptor the RGBA essence
    descriptor links. */
 asdcp_result_t asdcp_as02_jp2k_reader_read_jpeg2000_sub_descriptor(asdcp_as02_jp2k_reader_t r,

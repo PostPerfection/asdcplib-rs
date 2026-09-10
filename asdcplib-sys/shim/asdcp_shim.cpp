@@ -1367,6 +1367,10 @@ void asdcp_jp2k_picture_essence_coding_for_rsize(uint16_t rsize, uint8_t* out_ul
    (MXFTypes.h RGBALayoutTable). */
 static const byte_t RGB_COMPONENT_CODES[ASDCP_JP2K_MAX_COMPONENTS] = { 'R', 'G', 'B' };
 
+static const byte_t YUV_COMPONENT_CODES[ASDCP_JP2K_MAX_COMPONENTS] = { 'Y', 'U', 'V' };
+
+static const ui8_t CDCI_COLOR_SITING_COSITED = 0;
+
 /* SMPTE ST 377-1 puts 0 in the second entry for a progressive image, and a
    full-frame image starts at line 1. This is the pair as-02-wrap writes when
    given "-l 1,0" (as-02-wrap.cpp option -l at line 160, applied to the RGBA
@@ -1377,13 +1381,14 @@ static const ui32_t PROGRESSIVE_FULL_FRAME_LINE_MAP_SECOND = 0;
 
 /* One RGBALayout entry per codestream component, its code then its precision,
    the remaining entries left as the terminator. */
-static bool j2c_layout_from_codestream(const asdcp_codestream_header_t* codestream, byte_t* out) {
+static bool j2c_layout_from_codestream(const asdcp_codestream_header_t* codestream,
+    const byte_t* component_codes, byte_t* out) {
     if (codestream->csize == 0 || codestream->csize > ASDCP_JP2K_MAX_COMPONENTS) {
         return false;
     }
     memset(out, 0, ASDCP::MXF::RGBAValueLength);
     for (uint16_t i = 0; i < codestream->csize; ++i) {
-        out[i * 2] = RGB_COMPONENT_CODES[i];
+        out[i * 2] = component_codes[i];
         out[i * 2 + 1] = (codestream->image_components[i].ssize & SSIZE_DEPTH_MASK) + 1;
     }
     return true;
@@ -1399,13 +1404,23 @@ static const byte_t* rgb_pixel_layout_for_depth(uint8_t depth) {
     }
 }
 
-/* Build the AS-02 RGBA descriptor and open for writing. When hdr is non-null its
+static void delete_write_objects(ASDCP::MXF::InterchangeObject* ed,
+    ASDCP::MXF::InterchangeObject_list_t& subs) {
+    delete ed;
+    for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
+        delete *i;
+    }
+    subs.clear();
+}
+
+/* Build the AS-02 picture descriptor and open for writing. When hdr is non-null its
    HDR/WCG metadata is set on the descriptor before OpenWrite, so it is present in
    the header the writer serializes (SetSourceStream writes it during OpenWrite and
    WriteAS02Footer rewrites it at Finalize). */
 static asdcp_result_t as02_jp2k_open_write(asdcp_as02_jp2k_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
-    const asdcp_hdr_metadata_t* hdr, uint32_t header_size) {
+    const asdcp_hdr_metadata_t* hdr, bool use_cdci, uint32_t horizontal_subsampling,
+    uint32_t vertical_subsampling, uint32_t header_size) {
     const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
 
     ASDCP::WriterInfo wi;
@@ -1415,43 +1430,54 @@ static asdcp_result_t as02_jp2k_open_write(asdcp_as02_jp2k_writer_t w, const cha
     ASDCP::JP2K::PictureDescriptor pd;
     c_to_cpp_picture_desc(desc, pd);
 
-    // Build an RGBA essence descriptor plus a JPEG2000 picture sub-descriptor.
     // The writer takes ownership of both (see AS_02_JP2K.cpp: *i = 0).
-    ASDCP::MXF::RGBAEssenceDescriptor* ed = new ASDCP::MXF::RGBAEssenceDescriptor(dict);
+    ASDCP::MXF::CDCIEssenceDescriptor* cdci_ed =
+        use_cdci ? new ASDCP::MXF::CDCIEssenceDescriptor(dict) : 0;
+    ASDCP::MXF::RGBAEssenceDescriptor* rgba_ed =
+        use_cdci ? 0 : new ASDCP::MXF::RGBAEssenceDescriptor(dict);
+    ASDCP::MXF::GenericPictureEssenceDescriptor* ed = use_cdci
+        ? static_cast<ASDCP::MXF::GenericPictureEssenceDescriptor*>(cdci_ed)
+        : static_cast<ASDCP::MXF::GenericPictureEssenceDescriptor*>(rgba_ed);
     ASDCP::MXF::InterchangeObject_list_t subs;
     subs.push_back(new ASDCP::MXF::JPEG2000PictureSubDescriptor(dict));
 
     ASDCP::Result_t result = ASDCP::JP2K_PDesc_to_MD(
-        pd, *dict,
-        *static_cast<ASDCP::MXF::GenericPictureEssenceDescriptor*>(ed),
+        pd, *dict, *ed,
         *static_cast<ASDCP::MXF::JPEG2000PictureSubDescriptor*>(subs.back()));
 
     if (ASDCP_FAILURE(result)) {
-        delete ed;
-        for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
-            delete *i;
-        }
+        delete_write_objects(ed, subs);
         return result.Value();
     }
 
     const uint8_t component_depth =
         (desc->codestream.image_components[0].ssize & SSIZE_DEPTH_MASK) + 1;
-    const byte_t* pixel_layout = rgb_pixel_layout_for_depth(component_depth);
     byte_t j2c_layout[ASDCP::MXF::RGBAValueLength];
-    if (pixel_layout == 0 || !j2c_layout_from_codestream(&desc->codestream, j2c_layout)) {
-        delete ed;
-        for (ASDCP::MXF::InterchangeObject_list_t::iterator i = subs.begin(); i != subs.end(); ++i) {
-            delete *i;
-        }
+    if (!j2c_layout_from_codestream(&desc->codestream,
+            use_cdci ? YUV_COMPONENT_CODES : RGB_COMPONENT_CODES, j2c_layout)) {
+        delete_write_objects(ed, subs);
         return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    if (use_cdci) {
+        cdci_ed->ComponentDepth = component_depth;
+        cdci_ed->HorizontalSubsampling = horizontal_subsampling;
+        cdci_ed->VerticalSubsampling = vertical_subsampling;
+        cdci_ed->ColorSiting = CDCI_COLOR_SITING_COSITED;
+    } else {
+        const byte_t* pixel_layout = rgb_pixel_layout_for_depth(component_depth);
+        if (pixel_layout == 0) {
+            delete_write_objects(ed, subs);
+            return ASDCP::RESULT_FORMAT.Value();
+        }
+        rgba_ed->ScanningDirection = 0;
+        rgba_ed->PixelLayout = ASDCP::MXF::RGBALayout(pixel_layout);
+        rgba_ed->ComponentMaxRef = (1u << component_depth) - 1;
+        rgba_ed->ComponentMinRef = 0;
     }
 
     ed->PictureEssenceCoding =
         ASDCP::UL(dict->ul(essence_coding_for_rsize(desc->codestream.rsize)));
-    ed->ScanningDirection = 0;
-    ed->PixelLayout = ASDCP::MXF::RGBALayout(pixel_layout);
-    ed->ComponentMaxRef = (1u << component_depth) - 1;
-    ed->ComponentMinRef = 0;
     ed->VideoLineMap = ASDCP::MXF::LineMapPair(PROGRESSIVE_FULL_FRAME_LINE_MAP_FIRST,
         PROGRESSIVE_FULL_FRAME_LINE_MAP_SECOND);
     static_cast<ASDCP::MXF::JPEG2000PictureSubDescriptor*>(subs.back())->J2CLayout =
@@ -1468,13 +1494,21 @@ static asdcp_result_t as02_jp2k_open_write(asdcp_as02_jp2k_writer_t w, const cha
 
 asdcp_result_t asdcp_as02_jp2k_writer_open_write(asdcp_as02_jp2k_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc, uint32_t header_size) {
-    return as02_jp2k_open_write(w, filename, info, desc, 0, header_size);
+    return as02_jp2k_open_write(w, filename, info, desc, 0, false, 0, 0, header_size);
 }
 
 asdcp_result_t asdcp_as02_jp2k_writer_open_write_hdr(asdcp_as02_jp2k_writer_t w, const char* filename,
     const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
     const asdcp_hdr_metadata_t* hdr, uint32_t header_size) {
-    return as02_jp2k_open_write(w, filename, info, desc, hdr, header_size);
+    return as02_jp2k_open_write(w, filename, info, desc, hdr, false, 0, 0, header_size);
+}
+
+asdcp_result_t asdcp_as02_jp2k_writer_open_write_cdci(asdcp_as02_jp2k_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_picture_descriptor_t* desc,
+    const asdcp_hdr_metadata_t* hdr, uint32_t horizontal_subsampling,
+    uint32_t vertical_subsampling, uint32_t header_size) {
+    return as02_jp2k_open_write(w, filename, info, desc, hdr, true, horizontal_subsampling,
+        vertical_subsampling, header_size);
 }
 
 asdcp_result_t asdcp_as02_jp2k_writer_write_frame(asdcp_as02_jp2k_writer_t w,
@@ -1607,6 +1641,11 @@ static void copy_ui16_array(const ASDCP::MXF::optional_property<ASDCP::MXF::Arra
     *out_count = count;
 }
 
+static int32_t picture_essence_coding_present(const uint8_t* ul) {
+    const uint8_t nil_ul[ASDCP::SMPTE_UL_LENGTH] = { 0 };
+    return memcmp(ul, nil_ul, ASDCP::SMPTE_UL_LENGTH) == 0 ? 0 : 1;
+}
+
 static ASDCP::MXF::RGBAEssenceDescriptor* as02_rgba_descriptor(asdcp_as02_jp2k_reader_t r) {
     AS_02::JP2K::MXFReader* reader = static_cast<AS_02::JP2K::MXFReader*>(r);
     ASDCP::MXF::InterchangeObject* obj = 0;
@@ -1711,10 +1750,7 @@ asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reade
         return result;
     }
     memset(out, 0, sizeof(*out));
-    /* a descriptor carrying no PictureEssenceCoding leaves the UL nil */
-    const uint8_t nil_ul[ASDCP::SMPTE_UL_LENGTH] = { 0 };
-    out->has_picture_essence_coding =
-        memcmp(full.picture_essence_coding, nil_ul, ASDCP::SMPTE_UL_LENGTH) == 0 ? 0 : 1;
+    out->has_picture_essence_coding = picture_essence_coding_present(full.picture_essence_coding);
     memcpy(out->picture_essence_coding, full.picture_essence_coding, ASDCP::SMPTE_UL_LENGTH);
     memcpy(out->pixel_layout, full.pixel_layout, ASDCP::MXF::RGBAValueLength);
     out->has_component_max_ref = full.has_component_max_ref;
@@ -1722,6 +1758,36 @@ asdcp_result_t asdcp_as02_jp2k_reader_read_rgba_descriptor(asdcp_as02_jp2k_reade
     out->has_component_min_ref = full.has_component_min_ref;
     out->component_min_ref = full.component_min_ref;
     return result;
+}
+
+static ASDCP::MXF::CDCIEssenceDescriptor* as02_cdci_descriptor(asdcp_as02_jp2k_reader_t r) {
+    AS_02::JP2K::MXFReader* reader = static_cast<AS_02::JP2K::MXFReader*>(r);
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(
+        ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_CDCIEssenceDescriptor), &obj);
+    return dynamic_cast<ASDCP::MXF::CDCIEssenceDescriptor*>(obj);
+}
+
+asdcp_result_t asdcp_as02_jp2k_reader_read_cdci_descriptor(asdcp_as02_jp2k_reader_t r,
+    asdcp_cdci_descriptor_t* out) {
+    ASDCP::MXF::CDCIEssenceDescriptor* ed = as02_cdci_descriptor(r);
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->component_depth = ed->ComponentDepth;
+    out->horizontal_subsampling = ed->HorizontalSubsampling;
+    copy_optional_number(ed->VerticalSubsampling, &out->has_vertical_subsampling,
+        &out->vertical_subsampling);
+    copy_optional_number(ed->ColorSiting, &out->has_color_siting, &out->color_siting);
+    memcpy(out->picture_essence_coding, ed->PictureEssenceCoding.Value(), ASDCP::SMPTE_UL_LENGTH);
+    out->has_picture_essence_coding = picture_essence_coding_present(out->picture_essence_coding);
+    copy_optional_ul(ed->ColorPrimaries, &out->has_color_primaries, out->color_primaries);
+    copy_optional_ul(ed->TransferCharacteristic, &out->has_transfer_characteristic,
+        out->transfer_characteristic);
+    copy_optional_ul(ed->CodingEquations, &out->has_coding_equations, out->coding_equations);
+    return ASDCP::RESULT_OK.Value();
 }
 
 asdcp_result_t asdcp_as02_jp2k_reader_read_jpeg2000_sub_descriptor(asdcp_as02_jp2k_reader_t r,

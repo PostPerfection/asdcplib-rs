@@ -28,6 +28,8 @@ Photon reads PixelBitDepth out of the J2CLayout components, so a file without J2
 
 `as02::jp2k::MxfReader::rgba_essence_descriptor` and `jpeg2000_sub_descriptor` read back every item of `MXF::RGBAEssenceDescriptor` and `MXF::JPEG2000PictureSubDescriptor`, both InstanceIDs included, which is what an IMF CPL EssenceDescriptorList has to repeat verbatim. `rgba_descriptor` is the older four-item view of the same read.
 
+An App 2E track file may carry a `MXF::CDCIEssenceDescriptor` instead, and `as02::jp2k::MxfWriter::open_write_cdci` writes one: `ComponentDepth` off the same first component precision the RGBA path uses, `HorizontalSubsampling` and `VerticalSubsampling` from the caller, `ColorSiting` 0 for co-sited chroma, and the sub-descriptor's `J2CLayout` with the Y, U, V codes as-02-wrap's `RGBAValue_YUV_*` layouts carry. `PictureEssenceCoding`, `VideoLineMap` and the HDR metadata are what the RGBA path sets. `MxfReader::cdci_descriptor` reads back the depth, the subsampling, the colour siting and the PictureEssenceCoding, ColorPrimaries, TransferCharacteristic and CodingEquations labels. Either accessor returns `RESULT_FORMAT` when the header holds the other class, so that is how a caller learns whether the picture is YCbCr or RGB.
+
 The AS-DCP writer sets its own `PictureEssenceCoding` and forces Rsize to 3 or 4 by stored width, inside asdcplib, so a DCP always signals a cinema profile whatever the codestream says.
 
 ## Sound descriptor
@@ -42,4 +44,4 @@ Four items come from the writer rather than from the caller's `AudioDescriptor`:
 
 ## Testing
 
-65 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.
+68 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.

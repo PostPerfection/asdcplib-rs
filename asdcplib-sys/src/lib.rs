@@ -170,6 +170,25 @@ pub struct AsdcpRgbaDescriptor {
     pub component_min_ref: u32,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AsdcpCdciDescriptor {
+    pub component_depth: u32,
+    pub horizontal_subsampling: u32,
+    pub has_vertical_subsampling: c_int,
+    pub vertical_subsampling: u32,
+    pub has_color_siting: c_int,
+    pub color_siting: u8,
+    pub has_picture_essence_coding: c_int,
+    pub picture_essence_coding: [u8; 16],
+    pub has_color_primaries: c_int,
+    pub color_primaries: [u8; 16],
+    pub has_transfer_characteristic: c_int,
+    pub transfer_characteristic: [u8; 16],
+    pub has_coding_equations: c_int,
+    pub coding_equations: [u8; 16],
+}
+
 /// PCM audio descriptor (C-compatible).
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -888,6 +907,16 @@ unsafe extern "C" {
         hdr: *const AsdcpHdrMetadata,
         header_size: u32,
     ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_writer_open_write_cdci(
+        w: *mut AsdcpAs02Jp2kWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpPictureDescriptor,
+        hdr: *const AsdcpHdrMetadata,
+        horizontal_subsampling: u32,
+        vertical_subsampling: u32,
+        header_size: u32,
+    ) -> AsdcpResult;
     pub fn asdcp_as02_jp2k_writer_write_frame(
         w: *mut AsdcpAs02Jp2kWriter,
         frame_data: *const u8,
@@ -916,6 +945,10 @@ unsafe extern "C" {
     pub fn asdcp_as02_jp2k_reader_read_rgba_essence_descriptor(
         r: *mut AsdcpAs02Jp2kReader,
         out: *mut AsdcpRgbaEssenceDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_jp2k_reader_read_cdci_descriptor(
+        r: *mut AsdcpAs02Jp2kReader,
+        out: *mut AsdcpCdciDescriptor,
     ) -> AsdcpResult;
     pub fn asdcp_as02_jp2k_reader_read_jpeg2000_sub_descriptor(
         r: *mut AsdcpAs02Jp2kReader,
