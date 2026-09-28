@@ -2485,3 +2485,240 @@ mod as02_timed_text_tests {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+mod as02_iab_tests {
+    use asdcplib::as02::iab::*;
+    use asdcplib::as02::pcm::SoundfieldGroupProperties;
+    use asdcplib::{Rational, WriterInfo};
+
+    // the values Photon's IABEssenceDescriptor checks the track file against
+    const IMF_IAB_ESSENCE_CLIP_WRAPPED_CONTAINER: [u8; 16] = [
+        0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x0d, 0x01, 0x03, 0x01, 0x02, 0x1d, 0x01,
+        0x01,
+    ];
+    const IMMERSIVE_AUDIO_CODING: [u8; 16] = [
+        0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x05, 0x0e, 0x09, 0x06, 0x04, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+    const IAB_SOUNDFIELD_LABEL: [u8; 16] = [
+        0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x03, 0x02, 0x02, 0x21, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+
+    const PREAMBLE_TAG: u8 = 0x01;
+    const IA_FRAME_TAG: u8 = 0x02;
+
+    const SOUNDFIELD: SoundfieldGroupProperties = SoundfieldGroupProperties {
+        language: "en-US",
+        title: "Sol Levante",
+        title_version: "Original Version",
+        audio_content_kind: "PRM",
+        audio_element_kind: "FCMP",
+    };
+
+    const EDIT_RATE: Rational = Rational {
+        numerator: 24,
+        denominator: 1,
+    };
+    const REFERENCE_AUDIO_ALIGNMENT_LEVEL_DBFS: i8 = -20;
+
+    // element values are filler: no real IA bitstream is available
+    fn synthetic_ia_bitstream_frame(
+        seed: u8,
+        preamble_length: usize,
+        ia_frame_length: usize,
+    ) -> Vec<u8> {
+        let mut frame = vec![PREAMBLE_TAG];
+        frame.extend((preamble_length as u32).to_be_bytes());
+        frame.extend((0..preamble_length).map(|i| seed.wrapping_add(i as u8)));
+        frame.push(IA_FRAME_TAG);
+        frame.extend((ia_frame_length as u32).to_be_bytes());
+        frame.extend((0..ia_frame_length).map(|i| seed.wrapping_mul(7).wrapping_add(i as u8)));
+        frame
+    }
+
+    fn open_writer(path: &str) -> MxfWriter {
+        let mut writer = MxfWriter::new();
+        writer
+            .open_write(
+                path,
+                &WriterInfo {
+                    asset_uuid: [9; 16],
+                    ..Default::default()
+                },
+                &SOUNDFIELD,
+                EDIT_RATE,
+                asdcplib::SAMPLE_RATE_48K,
+                REFERENCE_AUDIO_ALIGNMENT_LEVEL_DBFS,
+            )
+            .unwrap();
+        writer
+    }
+
+    #[test]
+    fn test_as02_iab_roundtrip() {
+        let path = crate::util::temp_path("as02-iab-roundtrip");
+        let path_string = path.to_string_lossy().to_string();
+        // the middle frame is larger than the reader's first buffer
+        let frames = [
+            synthetic_ia_bitstream_frame(1, 20, 1_000),
+            synthetic_ia_bitstream_frame(2, 0, 200_000),
+            synthetic_ia_bitstream_frame(3, 7, 5_000),
+        ];
+
+        let mut writer = open_writer(&path_string);
+        for frame in &frames {
+            writer.write_frame(frame).unwrap();
+        }
+        writer.finalize().unwrap();
+        drop(writer);
+
+        assert_eq!(
+            asdcplib::essence_type(&path_string).unwrap(),
+            asdcplib::EssenceType::As02Iab
+        );
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        assert_eq!(reader.writer_info().unwrap().asset_uuid, [9; 16]);
+        assert_eq!(reader.frame_count().unwrap(), frames.len() as u32);
+        for (index, expected) in frames.iter().enumerate() {
+            let actual = reader.read_frame(index as u32).unwrap();
+            assert_eq!(actual.len(), expected.len(), "frame {index} length");
+            assert_eq!(actual, expected.as_slice(), "frame {index} bytes");
+        }
+        assert!(reader.read_frame(frames.len() as u32).is_err());
+
+        let descriptor = reader.iab_essence_descriptor().unwrap();
+        assert_eq!(descriptor.sample_rate, EDIT_RATE);
+        assert_eq!(descriptor.audio_sampling_rate, asdcplib::SAMPLE_RATE_48K);
+        assert_eq!(descriptor.container_duration, Some(frames.len() as u64));
+        assert_eq!(
+            descriptor.essence_container,
+            IMF_IAB_ESSENCE_CLIP_WRAPPED_CONTAINER
+        );
+        assert_eq!(descriptor.sound_essence_coding, IMMERSIVE_AUDIO_CODING);
+        assert_eq!(descriptor.quantization_bits, 24);
+        assert_eq!(descriptor.channel_count, 0);
+        assert_eq!(descriptor.codec, None);
+        assert_eq!(descriptor.electro_spatial_formulation, None);
+        assert_eq!(descriptor.reference_image_edit_rate, Some(EDIT_RATE));
+        assert_eq!(
+            descriptor.reference_audio_alignment_level,
+            Some(REFERENCE_AUDIO_ALIGNMENT_LEVEL_DBFS as u8)
+        );
+
+        let label = reader.soundfield_label().unwrap();
+        assert_eq!(descriptor.sub_descriptors, vec![label.instance_id]);
+        assert_eq!(label.tag_symbol, "IAB");
+        assert_eq!(label.tag_name.as_deref(), Some("IAB"));
+        assert_eq!(label.label_dictionary_id, IAB_SOUNDFIELD_LABEL);
+        assert_eq!(label.spoken_language.as_deref(), Some(SOUNDFIELD.language));
+        assert_eq!(label.title.as_deref(), Some(SOUNDFIELD.title));
+        assert_eq!(
+            label.title_version.as_deref(),
+            Some(SOUNDFIELD.title_version)
+        );
+        assert_eq!(
+            label.audio_content_kind.as_deref(),
+            Some(SOUNDFIELD.audio_content_kind)
+        );
+        assert_eq!(
+            label.audio_element_kind.as_deref(),
+            Some(SOUNDFIELD.audio_element_kind)
+        );
+        reader.close().unwrap();
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn test_as02_iab_writer_refuses_a_buffer_the_reader_cannot_split() {
+        let path = crate::util::temp_path("as02-iab-malformed");
+        let path_string = path.to_string_lossy().to_string();
+        let mut writer = open_writer(&path_string);
+
+        let mut overrun = synthetic_ia_bitstream_frame(4, 3, 100);
+        overrun.pop();
+        let mut trailing = synthetic_ia_bitstream_frame(5, 3, 100);
+        trailing.push(0);
+        let empty_ia_frame = synthetic_ia_bitstream_frame(6, 3, 0);
+        for refused in [b"dummy".to_vec(), overrun, trailing, empty_ia_frame] {
+            assert!(
+                matches!(
+                    writer.write_frame(&refused),
+                    Err(asdcplib::Error::InvalidArgument(_))
+                ),
+                "{refused:?}"
+            );
+        }
+
+        let accepted = synthetic_ia_bitstream_frame(7, 3, 100);
+        writer.write_frame(&accepted).unwrap();
+        writer.finalize().unwrap();
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        assert_eq!(reader.frame_count().unwrap(), 1);
+        assert_eq!(reader.read_frame(0).unwrap(), accepted.as_slice());
+        drop(reader);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn test_as02_iab_calls_outside_an_open_file_fail_without_crashing() {
+        let frame = synthetic_ia_bitstream_frame(8, 0, 10);
+
+        let mut unopened_writer = MxfWriter::new();
+        assert!(unopened_writer.write_frame(&frame).is_err());
+        assert!(unopened_writer.finalize().is_err());
+
+        let path = crate::util::temp_path("as02-iab-lifecycle");
+        let path_string = path.to_string_lossy().to_string();
+        let mut writer = open_writer(&path_string);
+        assert!(writer.finalize().is_err(), "an empty clip is refused");
+        writer.write_frame(&frame).unwrap();
+        writer.finalize().unwrap();
+        assert!(writer.write_frame(&frame).is_err());
+        assert!(writer.finalize().is_err());
+
+        let mut unopened_reader = MxfReader::new();
+        assert!(unopened_reader.frame_count().is_err());
+        assert!(unopened_reader.read_frame(0).is_err());
+        assert!(unopened_reader.iab_essence_descriptor().is_err());
+        assert!(unopened_reader.close().is_err());
+        assert!(
+            unopened_reader
+                .open_read("/nonexistent/as02-iab.mxf")
+                .is_err()
+        );
+        assert!(unopened_reader.frame_count().is_err());
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        reader.close().unwrap();
+        assert!(reader.read_frame(0).is_err());
+        assert!(reader.soundfield_label().is_err());
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn test_as02_iab_writer_refuses_encryption() {
+        let path = crate::util::temp_path("as02-iab-encrypted");
+        let mut writer = MxfWriter::new();
+        let result = writer.open_write(
+            &path.to_string_lossy(),
+            &WriterInfo {
+                encrypted_essence: true,
+                ..Default::default()
+            },
+            &SOUNDFIELD,
+            EDIT_RATE,
+            asdcplib::SAMPLE_RATE_48K,
+            REFERENCE_AUDIO_ALIGNMENT_LEVEL_DBFS,
+        );
+        assert!(matches!(result, Err(asdcplib::Error::InvalidArgument(_))));
+        assert!(!path.exists());
+    }
+}

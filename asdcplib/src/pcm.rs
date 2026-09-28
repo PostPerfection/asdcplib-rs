@@ -371,11 +371,11 @@ impl McaLabelSubDescriptor {
     }
 }
 
-fn optional<T>(has_value: i32, value: T) -> Option<T> {
+pub(crate) fn optional<T>(has_value: i32, value: T) -> Option<T> {
     if has_value != 0 { Some(value) } else { None }
 }
 
-fn mca_string(bytes: &[u8]) -> Result<String> {
+pub(crate) fn mca_string(bytes: &[u8]) -> Result<String> {
     let text = std::ffi::CStr::from_bytes_until_nul(bytes)
         .map_err(|_| crate::Error::InvalidArgument("unterminated mca label string"))?;
     text.to_str()

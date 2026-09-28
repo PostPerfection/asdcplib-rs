@@ -42,6 +42,10 @@ pub enum AsdcpAs02PcmReader {}
 pub enum AsdcpAs02TimedTextWriter {}
 /// Opaque handle to an AS-02 TimedText MXF reader.
 pub enum AsdcpAs02TimedTextReader {}
+/// Opaque handle to an AS-02 IAB MXF writer.
+pub enum AsdcpAs02IabWriter {}
+/// Opaque handle to an AS-02 IAB MXF reader.
+pub enum AsdcpAs02IabReader {}
 /// Opaque handle to an AES encryption context.
 pub enum AsdcpAesEncContext {}
 /// Opaque handle to an AES decryption context.
@@ -449,6 +453,46 @@ pub struct AsdcpWaveAudioDescriptor {
     pub avg_bps: u32,
     pub has_channel_assignment: c_int,
     pub channel_assignment: [u8; 16],
+}
+
+/// Every item of `ASDCP::MXF::IABEssenceDescriptor` and its base classes
+/// (C-compatible struct).
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct AsdcpIabEssenceDescriptor {
+    pub instance_id: [u8; 16],
+    pub has_generation_id: c_int,
+    pub generation_id: [u8; 16],
+
+    pub locator_count: u32,
+    pub locators: [[u8; 16]; ASDCP_MAX_LOCATORS],
+    pub sub_descriptor_count: u32,
+    pub sub_descriptors: [[u8; 16]; ASDCP_MAX_SOUND_SUB_DESCRIPTORS],
+
+    pub has_linked_track_id: c_int,
+    pub linked_track_id: u32,
+    pub sample_rate: AsdcpRational,
+    pub has_container_duration: c_int,
+    pub container_duration: u64,
+    pub essence_container: [u8; 16],
+    pub has_codec: c_int,
+    pub codec: [u8; 16],
+
+    pub audio_sampling_rate: AsdcpRational,
+    pub locked: c_int,
+    pub has_audio_ref_level: c_int,
+    pub audio_ref_level: u8,
+    pub has_electro_spatial_formulation: c_int,
+    pub electro_spatial_formulation: u8,
+    pub channel_count: u32,
+    pub quantization_bits: u32,
+    pub has_dial_norm: c_int,
+    pub dial_norm: u8,
+    pub sound_essence_coding: [u8; 16],
+    pub has_reference_audio_alignment_level: c_int,
+    pub reference_audio_alignment_level: u8,
+    pub has_reference_image_edit_rate: c_int,
+    pub reference_image_edit_rate: AsdcpRational,
 }
 
 /// Capacity of each string field in [`AsdcpMcaLabel`], including the terminator.
@@ -1096,6 +1140,57 @@ unsafe extern "C" {
         out_size: *mut u32,
         dec_ctx: *mut AsdcpAesDecContext,
         hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+
+    // ---- AS-02 IAB Writer ----
+    pub fn asdcp_as02_iab_writer_new() -> *mut AsdcpAs02IabWriter;
+    pub fn asdcp_as02_iab_writer_free(w: *mut AsdcpAs02IabWriter);
+    pub fn asdcp_as02_iab_writer_open_write(
+        w: *mut AsdcpAs02IabWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        soundfield: *const AsdcpSoundfieldGroupProperties,
+        edit_rate: AsdcpRational,
+        sampling_rate: AsdcpRational,
+        reference_audio_alignment_level: i8,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_iab_writer_write_frame(
+        w: *mut AsdcpAs02IabWriter,
+        frame_data: *const u8,
+        frame_size: u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_iab_writer_finalize(w: *mut AsdcpAs02IabWriter) -> AsdcpResult;
+
+    // ---- AS-02 IAB Reader ----
+    pub fn asdcp_as02_iab_reader_new() -> *mut AsdcpAs02IabReader;
+    pub fn asdcp_as02_iab_reader_free(r: *mut AsdcpAs02IabReader);
+    pub fn asdcp_as02_iab_reader_open_read(
+        r: *mut AsdcpAs02IabReader,
+        filename: *const c_char,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_iab_reader_close(r: *mut AsdcpAs02IabReader) -> AsdcpResult;
+    pub fn asdcp_as02_iab_reader_fill_writer_info(
+        r: *mut AsdcpAs02IabReader,
+        info: *mut AsdcpWriterInfo,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_iab_reader_frame_count(
+        r: *mut AsdcpAs02IabReader,
+        out_count: *mut u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_iab_reader_read_iab_essence_descriptor(
+        r: *mut AsdcpAs02IabReader,
+        out: *mut AsdcpIabEssenceDescriptor,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_iab_reader_read_soundfield_label(
+        r: *mut AsdcpAs02IabReader,
+        out_label: *mut AsdcpMcaLabel,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_iab_reader_read_frame(
+        r: *mut AsdcpAs02IabReader,
+        frame_number: u32,
+        buf: *mut u8,
+        buf_capacity: u32,
+        out_size: *mut u32,
     ) -> AsdcpResult;
 
     // ---- Utility ----

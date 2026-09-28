@@ -2,6 +2,7 @@
 #include "asdcp_shim.h"
 #include <AS_DCP.h>
 #include <AS_02.h>
+#include <AS_02_IAB.h>
 #include <Metadata.h>
 #include <MXF.h>
 #include <MDD.h>
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <string>
 #include <list>
+#include <vector>
 
 /* Internal descriptor converters live in AS_DCP_internal.h, which is not part
    of the public include surface. Forward-declare them exactly as the upstream
@@ -792,21 +794,11 @@ asdcp_result_t asdcp_pcm_reader_mca_label_count(asdcp_pcm_reader_t r, uint32_t* 
     return ASDCP::RESULT_OK.Value();
 }
 
-static asdcp_result_t fill_mca_label(const std::list<ASDCP::MXF::InterchangeObject*>& labels,
-    uint32_t index, asdcp_mca_label_t* out_label) {
-    if (index >= labels.size()) {
-        return ASDCP::RESULT_RANGE.Value();
-    }
-    std::list<ASDCP::MXF::InterchangeObject*>::const_iterator li = labels.begin();
-    for (uint32_t k = 0; k < index; k++) {
-        ++li;
-    }
-    ASDCP::MXF::MCALabelSubDescriptor* label =
-        dynamic_cast<ASDCP::MXF::MCALabelSubDescriptor*>(*li);
-
+static void copy_mca_label(ASDCP::MXF::MCALabelSubDescriptor* label, int32_t kind,
+    asdcp_mca_label_t* out_label) {
     memset(out_label, 0, sizeof(*out_label));
-    memcpy(out_label->instance_id, (*li)->InstanceUID.Value(), ASDCP::UUIDlen);
-    out_label->kind = mca_label_kind(*li);
+    memcpy(out_label->instance_id, label->InstanceUID.Value(), ASDCP::UUIDlen);
+    out_label->kind = kind;
     copy_mca_string(label->MCATagSymbol, out_label->tag_symbol);
     memcpy(out_label->label_dictionary_id, label->MCALabelDictionaryID.Value(), 16);
     memcpy(out_label->link_id, label->MCALinkID.Value(), 16);
@@ -839,12 +831,25 @@ static asdcp_result_t fill_mca_label(const std::list<ASDCP::MXF::InterchangeObje
         copy_mca_string(label->MCAAudioElementKind.const_get(), out_label->audio_element_kind);
     }
     ASDCP::MXF::AudioChannelLabelSubDescriptor* channel =
-        dynamic_cast<ASDCP::MXF::AudioChannelLabelSubDescriptor*>(*li);
+        dynamic_cast<ASDCP::MXF::AudioChannelLabelSubDescriptor*>(label);
     if (channel != 0 && !channel->SoundfieldGroupLinkID.empty()) {
         out_label->has_soundfield_group_link_id = 1;
         memcpy(out_label->soundfield_group_link_id,
             channel->SoundfieldGroupLinkID.const_get().Value(), 16);
     }
+}
+
+static asdcp_result_t fill_mca_label(const std::list<ASDCP::MXF::InterchangeObject*>& labels,
+    uint32_t index, asdcp_mca_label_t* out_label) {
+    if (index >= labels.size()) {
+        return ASDCP::RESULT_RANGE.Value();
+    }
+    std::list<ASDCP::MXF::InterchangeObject*>::const_iterator li = labels.begin();
+    for (uint32_t k = 0; k < index; k++) {
+        ++li;
+    }
+    copy_mca_label(dynamic_cast<ASDCP::MXF::MCALabelSubDescriptor*>(*li), mca_label_kind(*li),
+        out_label);
     return ASDCP::RESULT_OK.Value();
 }
 
@@ -2088,30 +2093,11 @@ asdcp_result_t asdcp_as02_pcm_reader_read_frame(asdcp_as02_pcm_reader_t r, uint3
     return result.Value();
 }
 
-static ASDCP::MXF::WaveAudioDescriptor* as02_wave_audio_descriptor(asdcp_as02_pcm_reader_t r) {
-    AS_02::PCM::MXFReader* reader = static_cast<AS_02::PCM::MXFReader*>(r);
-    ASDCP::MXF::InterchangeObject* obj = 0;
-    reader->OP1aHeader().GetMDObjectByType(
-        ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_WaveAudioDescriptor), &obj);
-    return dynamic_cast<ASDCP::MXF::WaveAudioDescriptor*>(obj);
-}
-
-asdcp_result_t asdcp_as02_pcm_reader_read_channel_assignment(asdcp_as02_pcm_reader_t r,
-    uint8_t* out_ul, int32_t* present) {
-    ASDCP::MXF::WaveAudioDescriptor* wd = as02_wave_audio_descriptor(r);
-    if (wd == 0) {
-        return ASDCP::RESULT_FORMAT.Value();
-    }
-    copy_optional_ul(wd->ChannelAssignment, present, out_ul);
-    return ASDCP::RESULT_OK.Value();
-}
-
-asdcp_result_t asdcp_as02_pcm_reader_read_wave_audio_descriptor(asdcp_as02_pcm_reader_t r,
-    asdcp_wave_audio_descriptor_t* out) {
-    ASDCP::MXF::WaveAudioDescriptor* ed = as02_wave_audio_descriptor(r);
-    if (ed == 0) {
-        return ASDCP::RESULT_FORMAT.Value();
-    }
+/* The FileDescriptor and GenericSoundEssenceDescriptor items, which the wave
+   and IAB descriptor structs name alike. */
+template <typename SoundDescriptor>
+static asdcp_result_t copy_sound_essence_items(const ASDCP::MXF::GenericSoundEssenceDescriptor* ed,
+    SoundDescriptor* out) {
     if (ed->Locators.size() > ASDCP_MAX_LOCATORS ||
         ed->SubDescriptors.size() > ASDCP_MAX_SOUND_SUB_DESCRIPTORS) {
         return ASDCP::RESULT_RANGE.Value();
@@ -2157,6 +2143,37 @@ asdcp_result_t asdcp_as02_pcm_reader_read_wave_audio_descriptor(asdcp_as02_pcm_r
         out->reference_image_edit_rate.numerator = ed->ReferenceImageEditRate.const_get().Numerator;
         out->reference_image_edit_rate.denominator =
             ed->ReferenceImageEditRate.const_get().Denominator;
+    }
+    return ASDCP::RESULT_OK.Value();
+}
+
+static ASDCP::MXF::WaveAudioDescriptor* as02_wave_audio_descriptor(asdcp_as02_pcm_reader_t r) {
+    AS_02::PCM::MXFReader* reader = static_cast<AS_02::PCM::MXFReader*>(r);
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    reader->OP1aHeader().GetMDObjectByType(
+        ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_WaveAudioDescriptor), &obj);
+    return dynamic_cast<ASDCP::MXF::WaveAudioDescriptor*>(obj);
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_read_channel_assignment(asdcp_as02_pcm_reader_t r,
+    uint8_t* out_ul, int32_t* present) {
+    ASDCP::MXF::WaveAudioDescriptor* wd = as02_wave_audio_descriptor(r);
+    if (wd == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    copy_optional_ul(wd->ChannelAssignment, present, out_ul);
+    return ASDCP::RESULT_OK.Value();
+}
+
+asdcp_result_t asdcp_as02_pcm_reader_read_wave_audio_descriptor(asdcp_as02_pcm_reader_t r,
+    asdcp_wave_audio_descriptor_t* out) {
+    ASDCP::MXF::WaveAudioDescriptor* ed = as02_wave_audio_descriptor(r);
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    asdcp_result_t result = copy_sound_essence_items(ed, out);
+    if (!ASDCP_SUCCESS(result)) {
+        return result;
     }
 
     out->block_align = ed->BlockAlign;
@@ -2285,6 +2302,237 @@ asdcp_result_t asdcp_as02_timed_text_reader_read_timed_text_resource(asdcp_as02_
     } else {
         *out_size = 0;
     }
+    return result.Value();
+}
+
+/* ---- AS-02 IAB Writer ---- */
+/* AS_02::IAB::MXFWriter dereferences null before OpenWrite and after a failure or Finalize. */
+struct as02_iab_writer {
+    AS_02::IAB::MXFWriter writer;
+    bool open;
+    bool wrote_frame;
+    as02_iab_writer() : open(false), wrote_frame(false) {}
+};
+
+static const int32_t MCA_LABEL_KIND_IAB_SOUNDFIELD = 3;
+
+asdcp_as02_iab_writer_t asdcp_as02_iab_writer_new(void) {
+    return new as02_iab_writer();
+}
+
+void asdcp_as02_iab_writer_free(asdcp_as02_iab_writer_t w) {
+    delete static_cast<as02_iab_writer*>(w);
+}
+
+asdcp_result_t asdcp_as02_iab_writer_open_write(asdcp_as02_iab_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_soundfield_group_properties_t* soundfield,
+    asdcp_rational_t edit_rate, asdcp_rational_t sampling_rate,
+    int8_t reference_audio_alignment_level) {
+    as02_iab_writer* handle = static_cast<as02_iab_writer*>(w);
+    if (handle->open) {
+        return ASDCP::RESULT_STATE.Value();
+    }
+    const ASDCP::Dictionary* dict = &ASDCP::DefaultSMPTEDict();
+
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    wi.LabelSetType = ASDCP::LS_MXF_SMPTE;
+
+    /* OpenWrite copies the label and fills in the tag, dictionary id and link id itself. */
+    ASDCP::MXF::IABSoundfieldLabelSubDescriptor label(dict);
+    label.RFC5646SpokenLanguage = std::string(soundfield->language);
+    label.MCATitle = ASDCP::MXF::UTF16String(std::string(soundfield->title));
+    label.MCATitleVersion = ASDCP::MXF::UTF16String(std::string(soundfield->title_version));
+    label.MCAAudioContentKind =
+        ASDCP::MXF::UTF16String(std::string(soundfield->audio_content_kind));
+    label.MCAAudioElementKind =
+        ASDCP::MXF::UTF16String(std::string(soundfield->audio_element_kind));
+
+    std::vector<ASDCP::UL> conforms_to_specifications;
+    conforms_to_specifications.push_back(ASDCP::UL(dict->ul(ASDCP::MDD_IMF_IABTrackFileLevel0)));
+
+    ASDCP::Result_t result = handle->writer.OpenWrite(std::string(filename), wi, label,
+        conforms_to_specifications,
+        ASDCP::Rational(edit_rate.numerator, edit_rate.denominator),
+        ASDCP::Rational(sampling_rate.numerator, sampling_rate.denominator));
+    handle->open = false;
+    handle->wrote_frame = false;
+    if (ASDCP_FAILURE(result)) {
+        return result.Value();
+    }
+
+    /* OpenWrite already wrote the header, WriteAS02Footer rewrites it at Finalize. */
+    ASDCP::MXF::OP1aHeader& header = const_cast<ASDCP::MXF::OP1aHeader&>(handle->writer.OP1aHeader());
+    ASDCP::MXF::InterchangeObject* object = 0;
+    header.GetMDObjectByType(dict->ul(ASDCP::MDD_IABEssenceDescriptor), &object);
+    ASDCP::MXF::IABEssenceDescriptor* descriptor =
+        dynamic_cast<ASDCP::MXF::IABEssenceDescriptor*>(object);
+    if (descriptor == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    /* An IMF IAB track runs at the composition edit rate, which is the image edit rate. */
+    descriptor->ReferenceImageEditRate = ASDCP::Rational(edit_rate.numerator, edit_rate.denominator);
+    descriptor->ReferenceAudioAlignmentLevel =
+        static_cast<ui8_t>(reference_audio_alignment_level);
+    handle->open = true;
+    return result.Value();
+}
+
+/* The writer's own refusals of an empty frame and an empty clip do not reset it, so they are made here. */
+asdcp_result_t asdcp_as02_iab_writer_write_frame(asdcp_as02_iab_writer_t w,
+    const uint8_t* frame_data, uint32_t frame_size) {
+    as02_iab_writer* handle = static_cast<as02_iab_writer*>(w);
+    if (!handle->open) {
+        return ASDCP::RESULT_INIT.Value();
+    }
+    if (frame_size == 0) {
+        return ASDCP::RESULT_PARAM.Value();
+    }
+    ASDCP::Result_t result = handle->writer.WriteFrame(frame_data, frame_size);
+    if (ASDCP_FAILURE(result)) {
+        handle->open = false;
+    } else {
+        handle->wrote_frame = true;
+    }
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_iab_writer_finalize(asdcp_as02_iab_writer_t w) {
+    as02_iab_writer* handle = static_cast<as02_iab_writer*>(w);
+    if (!handle->open) {
+        return ASDCP::RESULT_INIT.Value();
+    }
+    if (!handle->wrote_frame) {
+        return ASDCP::RESULT_STATE.Value();
+    }
+    handle->open = false;
+    return handle->writer.Finalize().Value();
+}
+
+/* ---- AS-02 IAB Reader ---- */
+/* The reader keeps a reference to the factory, and dereferences null when not open. */
+struct as02_iab_reader {
+    Kumu::FileReaderFactory factory;
+    AS_02::IAB::MXFReader reader;
+    bool open;
+    as02_iab_reader() : reader(factory), open(false) {}
+};
+
+asdcp_as02_iab_reader_t asdcp_as02_iab_reader_new(void) {
+    return new as02_iab_reader();
+}
+
+void asdcp_as02_iab_reader_free(asdcp_as02_iab_reader_t r) {
+    delete static_cast<as02_iab_reader*>(r);
+}
+
+asdcp_result_t asdcp_as02_iab_reader_open_read(asdcp_as02_iab_reader_t r, const char* filename) {
+    as02_iab_reader* handle = static_cast<as02_iab_reader*>(r);
+    if (handle->open) {
+        return ASDCP::RESULT_STATE.Value();
+    }
+    ASDCP::Result_t result = handle->reader.OpenRead(std::string(filename));
+    handle->open = ASDCP_SUCCESS(result);
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_iab_reader_close(asdcp_as02_iab_reader_t r) {
+    as02_iab_reader* handle = static_cast<as02_iab_reader*>(r);
+    if (!handle->open) {
+        return ASDCP::RESULT_INIT.Value();
+    }
+    handle->open = false;
+    return handle->reader.Close().Value();
+}
+
+asdcp_result_t asdcp_as02_iab_reader_fill_writer_info(asdcp_as02_iab_reader_t r, asdcp_writer_info_t* info) {
+    as02_iab_reader* handle = static_cast<as02_iab_reader*>(r);
+    if (!handle->open) {
+        return ASDCP::RESULT_INIT.Value();
+    }
+    ASDCP::WriterInfo wi;
+    ASDCP::Result_t result = handle->reader.FillWriterInfo(wi);
+    if (ASDCP_SUCCESS(result)) {
+        cpp_to_c_writer_info(wi, info);
+    }
+    return result.Value();
+}
+
+asdcp_result_t asdcp_as02_iab_reader_frame_count(asdcp_as02_iab_reader_t r, uint32_t* out_count) {
+    as02_iab_reader* handle = static_cast<as02_iab_reader*>(r);
+    if (!handle->open) {
+        return ASDCP::RESULT_INIT.Value();
+    }
+    ui32_t count = 0;
+    ASDCP::Result_t result = handle->reader.GetFrameCount(count);
+    *out_count = count;
+    return result.Value();
+}
+
+static ASDCP::MXF::IABEssenceDescriptor* as02_iab_essence_descriptor(as02_iab_reader* handle) {
+    ASDCP::MXF::InterchangeObject* obj = 0;
+    handle->reader.OP1aHeader().GetMDObjectByType(
+        ASDCP::DefaultCompositeDict().ul(ASDCP::MDD_IABEssenceDescriptor), &obj);
+    return dynamic_cast<ASDCP::MXF::IABEssenceDescriptor*>(obj);
+}
+
+asdcp_result_t asdcp_as02_iab_reader_read_iab_essence_descriptor(asdcp_as02_iab_reader_t r,
+    asdcp_iab_essence_descriptor_t* out) {
+    as02_iab_reader* handle = static_cast<as02_iab_reader*>(r);
+    if (!handle->open) {
+        return ASDCP::RESULT_INIT.Value();
+    }
+    ASDCP::MXF::IABEssenceDescriptor* ed = as02_iab_essence_descriptor(handle);
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    return copy_sound_essence_items(ed, out);
+}
+
+asdcp_result_t asdcp_as02_iab_reader_read_soundfield_label(asdcp_as02_iab_reader_t r,
+    asdcp_mca_label_t* out_label) {
+    as02_iab_reader* handle = static_cast<as02_iab_reader*>(r);
+    if (!handle->open) {
+        return ASDCP::RESULT_INIT.Value();
+    }
+    ASDCP::MXF::IABEssenceDescriptor* ed = as02_iab_essence_descriptor(handle);
+    if (ed == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    ASDCP::MXF::IABSoundfieldLabelSubDescriptor* label = 0;
+    for (size_t k = 0; k < ed->SubDescriptors.size(); k++) {
+        ASDCP::MXF::InterchangeObject* sub = 0;
+        if (ASDCP_FAILURE(handle->reader.OP1aHeader().GetMDObjectByID(ed->SubDescriptors[k], &sub))) {
+            continue;
+        }
+        ASDCP::MXF::IABSoundfieldLabelSubDescriptor* candidate =
+            dynamic_cast<ASDCP::MXF::IABSoundfieldLabelSubDescriptor*>(sub);
+        if (candidate == 0) {
+            continue;
+        }
+        if (label != 0) {
+            return ASDCP::RESULT_FORMAT.Value();
+        }
+        label = candidate;
+    }
+    if (label == 0) {
+        return ASDCP::RESULT_FORMAT.Value();
+    }
+    copy_mca_label(label, MCA_LABEL_KIND_IAB_SOUNDFIELD, out_label);
+    return ASDCP::RESULT_OK.Value();
+}
+
+asdcp_result_t asdcp_as02_iab_reader_read_frame(asdcp_as02_iab_reader_t r, uint32_t frame_number,
+    uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size) {
+    as02_iab_reader* handle = static_cast<as02_iab_reader*>(r);
+    if (!handle->open) {
+        return ASDCP::RESULT_INIT.Value();
+    }
+    /* the Frame overload loses bytes when it grows its own buffer, so read into the caller's */
+    ASDCP::FrameBuffer fb;
+    fb.SetData(buf, buf_capacity);
+    ASDCP::Result_t result = handle->reader.ReadFrame(frame_number, fb);
+    *out_size = fb.Size();
     return result.Value();
 }
 

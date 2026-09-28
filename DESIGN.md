@@ -10,7 +10,7 @@ Safe Rust bindings for asdcplib (SMPTE AS-DCP / AS-02 MXF).
 ## Coverage
 
 - AS-DCP writers/readers: JP2K (mono + stereo), PCM, timed text, Atmos.
-- AS-02 (IMF) writers/readers: JP2K, PCM (plain or with ST 377-4 MCA labels and the IMF MCA ChannelAssignment UL), timed text.
+- AS-02 (IMF) writers/readers: JP2K, PCM (plain or with ST 377-4 MCA labels and the IMF MCA ChannelAssignment UL), timed text, IAB.
 
 ## AS-02 audio labels
 
@@ -45,3 +45,11 @@ Four items come from the writer rather than from the caller's `AudioDescriptor`:
 ## Testing
 
 68 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.
+
+## IAB
+
+`as02::iab::MxfWriter` wraps asdcplib's `AS_02::IAB::MXFWriter` (ST 2067-201). asdcplib builds the `IABEssenceDescriptor` itself: `SampleRate` is the edit rate, `AudioSamplingRate` the caller's sampling rate, `ChannelCount` 0, `QuantizationBits` 24, `SoundEssenceCoding` the ImmersiveAudioCoding UL, the essence container the IMF clip-wrapped IAB UL, and `ConformsToSpecifications` in the preface is the IAB Level 0 plug-in UL the shim passes. The caller supplies the five `SoundfieldGroupProperties` items, which the shim sets on the one `IABSoundfieldLabelSubDescriptor`, and asdcplib adds the IAB tag name, tag symbol, dictionary ID and link ID. `open_write` then sets `ReferenceImageEditRate` to the edit rate and `ReferenceAudioAlignmentLevel` to the caller's level, stored as the two's complement byte of a signed dBFS value (-20 for IMF). OpenWrite has already written the header partition by then, and they land in the file because `Finalize` rewrites the whole header partition in place.
+
+asdcplib's IAB reader walks each frame's preamble and IA frame lengths to find where the frame ends, so `write_frame` refuses a buffer whose two length fields do not add up to its size, or whose IA frame element is empty. The tag bytes are not checked. The reader's own growing-buffer `ReadFrame` overload frees the bytes it has read each time it grows, so the shim reads into the caller's buffer and `MxfReader::read_frame` doubles its buffer on `RESULT_SMALLBUF`.
+
+asdcplib's IAB writer and reader dereference a null state when called before opening, after a failed call or after `Finalize` or `Close`, so the shim tracks whether each handle is open and returns `RESULT_INIT` instead of calling through.

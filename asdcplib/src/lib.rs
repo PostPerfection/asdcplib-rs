@@ -13,8 +13,9 @@
 //! - JPEG 2000 (frame-wrapped)
 //! - PCM audio (clip-wrapped)
 //! - Timed Text (SMPTE ST 2067-2)
+//! - IAB immersive audio (clip-wrapped, SMPTE ST 2067-201), cleartext only
 //!
-//! Other AS-02 essence (ISXD, ACES, IAB, JPEG XS) is detection-only via [`essence_type`].
+//! Other AS-02 essence (ISXD, ACES, JPEG XS) is detection-only via [`essence_type`].
 //!
 //! # Example
 //! ```no_run

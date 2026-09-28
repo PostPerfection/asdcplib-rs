@@ -56,8 +56,9 @@ AS-02 (IMF, ST 2067-5) read/write, in the `as02` module:
 - JPEG 2000 (frame-wrapped)
 - PCM audio (clip-wrapped), with SMPTE ST 377-4 MCA labels and the IMF MCA ChannelAssignment UL
 - Timed Text (SMPTE ST 2067-2)
+- IAB immersive audio (clip-wrapped, SMPTE ST 2067-201 Level 0), cleartext only
 
-Other AS-02 essence (ISXD, ACES, IAB, JPEG XS) is detection-only via `essence_type`.
+Other AS-02 essence (ISXD, ACES, JPEG XS) is detection-only via `essence_type`.
 
 The JP2K writers/readers (AS-DCP and AS-02) set and read ST 2067-21 HDR/WCG picture metadata: transfer characteristic, color primaries and the ST 2086 mastering display block. AS-DCP also has a transfer-characteristic-only path for HDR DCI Addendum DCPs. MaxCLL/MaxFALL are not here because ST 2067-21 puts them in the CPL ExtensionProperties, not in the MXF descriptor.
 

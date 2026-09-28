@@ -401,12 +401,50 @@ typedef struct {
     uint8_t channel_assignment[16];
 } asdcp_wave_audio_descriptor_t;
 
+/* Every item of ASDCP::MXF::IABEssenceDescriptor, which adds none to
+   GenericSoundEssenceDescriptor. Each has_* flag guards the field below it. */
+typedef struct {
+    uint8_t instance_id[16];
+    int32_t has_generation_id;
+    uint8_t generation_id[16];
+
+    uint32_t locator_count;
+    uint8_t locators[ASDCP_MAX_LOCATORS][16];
+    uint32_t sub_descriptor_count;
+    uint8_t sub_descriptors[ASDCP_MAX_SOUND_SUB_DESCRIPTORS][16];
+
+    int32_t has_linked_track_id;
+    uint32_t linked_track_id;
+    asdcp_rational_t sample_rate;
+    int32_t has_container_duration;
+    uint64_t container_duration;
+    uint8_t essence_container[16];
+    int32_t has_codec;
+    uint8_t codec[16];
+
+    asdcp_rational_t audio_sampling_rate;
+    int32_t locked;
+    int32_t has_audio_ref_level;
+    uint8_t audio_ref_level;
+    int32_t has_electro_spatial_formulation;
+    uint8_t electro_spatial_formulation;
+    uint32_t channel_count;
+    uint32_t quantization_bits;
+    int32_t has_dial_norm;
+    uint8_t dial_norm;
+    uint8_t sound_essence_coding[16];
+    int32_t has_reference_audio_alignment_level;
+    uint8_t reference_audio_alignment_level;
+    int32_t has_reference_image_edit_rate;
+    asdcp_rational_t reference_image_edit_rate;
+} asdcp_iab_essence_descriptor_t;
+
 /* asdcplib refuses to write an MCA string longer than 128 bytes, so 128 plus a
    terminator holds anything it wrote. */
 #define ASDCP_MCA_STRING_CAPACITY 129
 
 /* One SMPTE 377-4 MCA label subdescriptor. kind is 0 = audio channel,
-   1 = soundfield group, 2 = group of soundfield groups. Strings are
+   1 = soundfield group, 2 = group of soundfield groups, 3 = IAB soundfield. Strings are
    NUL-terminated and truncated to fit. Each has_* flag guards the field below
    it; instance_id, tag_symbol, label_dictionary_id and link_id are always
    present. */
@@ -462,6 +500,8 @@ typedef void* asdcp_as02_pcm_writer_t;
 typedef void* asdcp_as02_pcm_reader_t;
 typedef void* asdcp_as02_timed_text_writer_t;
 typedef void* asdcp_as02_timed_text_reader_t;
+typedef void* asdcp_as02_iab_writer_t;
+typedef void* asdcp_as02_iab_reader_t;
 typedef void* asdcp_aes_enc_context_t;
 typedef void* asdcp_aes_dec_context_t;
 typedef void* asdcp_hmac_context_t;
@@ -774,6 +814,34 @@ asdcp_result_t asdcp_as02_timed_text_reader_fill_writer_info(asdcp_as02_timed_te
 asdcp_result_t asdcp_as02_timed_text_reader_read_timed_text_resource(asdcp_as02_timed_text_reader_t r,
     uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
     asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx);
+
+/* AS-02 IAB Writer (clip-wrapped, ST 2067-201 Level 0). write_frame hands
+   frame_data to write(2) and keeps no reference to it. */
+asdcp_as02_iab_writer_t asdcp_as02_iab_writer_new(void);
+void asdcp_as02_iab_writer_free(asdcp_as02_iab_writer_t w);
+asdcp_result_t asdcp_as02_iab_writer_open_write(asdcp_as02_iab_writer_t w, const char* filename,
+    const asdcp_writer_info_t* info, const asdcp_soundfield_group_properties_t* soundfield,
+    asdcp_rational_t edit_rate, asdcp_rational_t sampling_rate,
+    int8_t reference_audio_alignment_level);
+asdcp_result_t asdcp_as02_iab_writer_write_frame(asdcp_as02_iab_writer_t w,
+    const uint8_t* frame_data, uint32_t frame_size);
+asdcp_result_t asdcp_as02_iab_writer_finalize(asdcp_as02_iab_writer_t w);
+
+/* AS-02 IAB Reader */
+asdcp_as02_iab_reader_t asdcp_as02_iab_reader_new(void);
+void asdcp_as02_iab_reader_free(asdcp_as02_iab_reader_t r);
+asdcp_result_t asdcp_as02_iab_reader_open_read(asdcp_as02_iab_reader_t r, const char* filename);
+asdcp_result_t asdcp_as02_iab_reader_close(asdcp_as02_iab_reader_t r);
+asdcp_result_t asdcp_as02_iab_reader_fill_writer_info(asdcp_as02_iab_reader_t r, asdcp_writer_info_t* info);
+asdcp_result_t asdcp_as02_iab_reader_frame_count(asdcp_as02_iab_reader_t r, uint32_t* out_count);
+asdcp_result_t asdcp_as02_iab_reader_read_iab_essence_descriptor(asdcp_as02_iab_reader_t r,
+    asdcp_iab_essence_descriptor_t* out);
+/* The one IABSoundfieldLabelSubDescriptor the descriptor links, kind 3. */
+asdcp_result_t asdcp_as02_iab_reader_read_soundfield_label(asdcp_as02_iab_reader_t r,
+    asdcp_mca_label_t* out_label);
+/* RESULT_SMALLBUF when the frame is longer than buf_capacity. */
+asdcp_result_t asdcp_as02_iab_reader_read_frame(asdcp_as02_iab_reader_t r, uint32_t frame_number,
+    uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size);
 
 /* Utility */
 int32_t asdcp_result_ok(asdcp_result_t result);

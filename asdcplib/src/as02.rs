@@ -8,6 +8,8 @@
 //! Descriptors are shared with the AS-DCP modules ([`crate::jp2k::PictureDescriptor`],
 //! [`crate::pcm::AudioDescriptor`], [`crate::timed_text::TimedTextDescriptor`]).
 
+pub mod iab;
+
 /// AS-02 JPEG 2000 (frame-wrapped) read/write.
 pub mod jp2k {
     use crate::crypto::{AesDecContext, AesEncContext, HmacContext};
@@ -664,7 +666,7 @@ pub mod pcm {
     const SOUNDFIELD_GROUP_PROPERTY_COUNT: usize = 5;
 
     impl SoundfieldGroupProperties<'_> {
-        fn to_cstrings(&self) -> Result<[CString; SOUNDFIELD_GROUP_PROPERTY_COUNT]> {
+        pub(crate) fn to_cstrings(&self) -> Result<[CString; SOUNDFIELD_GROUP_PROPERTY_COUNT]> {
             let fields = [
                 self.language,
                 self.title,
