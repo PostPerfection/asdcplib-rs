@@ -1116,6 +1116,16 @@ unsafe extern "C" {
         hmac_ctx: *mut AsdcpHmacContext,
     ) -> AsdcpResult;
     pub fn asdcp_as02_timed_text_writer_finalize(w: *mut AsdcpAs02TimedTextWriter) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_writer_open_write_with_resources(
+        w: *mut AsdcpAs02TimedTextWriter,
+        filename: *const c_char,
+        info: *const AsdcpWriterInfo,
+        desc: *const AsdcpTimedTextDescriptor,
+        resource_uuids: *const u8,
+        resource_types: *const i32,
+        resource_count: u32,
+        header_size: u32,
+    ) -> AsdcpResult;
 
     // ---- AS-02 TimedText Reader ----
     pub fn asdcp_as02_timed_text_reader_new() -> *mut AsdcpAs02TimedTextReader;
@@ -1135,6 +1145,25 @@ unsafe extern "C" {
     ) -> AsdcpResult;
     pub fn asdcp_as02_timed_text_reader_read_timed_text_resource(
         r: *mut AsdcpAs02TimedTextReader,
+        buf: *mut u8,
+        buf_capacity: u32,
+        out_size: *mut u32,
+        dec_ctx: *mut AsdcpAesDecContext,
+        hmac_ctx: *mut AsdcpHmacContext,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_reader_ancillary_resource_count(
+        r: *mut AsdcpAs02TimedTextReader,
+        out_count: *mut u32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_reader_ancillary_resource_info(
+        r: *mut AsdcpAs02TimedTextReader,
+        index: u32,
+        out_uuid: *mut u8,
+        out_type: *mut i32,
+    ) -> AsdcpResult;
+    pub fn asdcp_as02_timed_text_reader_read_ancillary_resource(
+        r: *mut AsdcpAs02TimedTextReader,
+        resource_uuid: *const u8,
         buf: *mut u8,
         buf_capacity: u32,
         out_size: *mut u32,

@@ -912,6 +912,16 @@ asdcp_result_t asdcp_timed_text_writer_finalize(asdcp_timed_text_writer_t w) {
 /* The writer records ancillary resources (their UUID + MIME type) from the
    descriptor's ResourceList at open time; without them the reader cannot
    enumerate the resources. Build that list from the parallel arrays. */
+static void declare_timed_text_resources(const uint8_t* resource_uuids, const int32_t* resource_types,
+    uint32_t resource_count, ASDCP::TimedText::TimedTextDescriptor& td) {
+    for (uint32_t i = 0; i < resource_count; i++) {
+        ASDCP::TimedText::TimedTextResourceDescriptor rd;
+        memcpy(rd.ResourceID, resource_uuids + i * 16, 16);
+        rd.Type = static_cast<ASDCP::TimedText::MIMEType_t>(resource_types[i]);
+        td.ResourceList.push_back(rd);
+    }
+}
+
 asdcp_result_t asdcp_timed_text_writer_open_write_with_resources(asdcp_timed_text_writer_t w,
     const char* filename, const asdcp_writer_info_t* info, const asdcp_timed_text_descriptor_t* desc,
     const uint8_t* resource_uuids, const int32_t* resource_types, uint32_t resource_count,
@@ -920,12 +930,7 @@ asdcp_result_t asdcp_timed_text_writer_open_write_with_resources(asdcp_timed_tex
     c_to_cpp_writer_info(info, wi);
     ASDCP::TimedText::TimedTextDescriptor td;
     c_to_cpp_timed_text_desc(desc, td);
-    for (uint32_t i = 0; i < resource_count; i++) {
-        ASDCP::TimedText::TimedTextResourceDescriptor rd;
-        memcpy(rd.ResourceID, resource_uuids + i * 16, 16);
-        rd.Type = static_cast<ASDCP::TimedText::MIMEType_t>(resource_types[i]);
-        td.ResourceList.push_back(rd);
-    }
+    declare_timed_text_resources(resource_uuids, resource_types, resource_count, td);
     return static_cast<ASDCP::TimedText::MXFWriter*>(w)->OpenWrite(std::string(filename), wi, td, header_size).Value();
 }
 
@@ -988,20 +993,22 @@ asdcp_result_t asdcp_timed_text_reader_read_timed_text_resource(asdcp_timed_text
     return result.Value();
 }
 
-asdcp_result_t asdcp_timed_text_reader_ancillary_resource_count(asdcp_timed_text_reader_t r,
-    uint32_t* out_count) {
+// the AS-DCP and AS-02 readers share these calls, AS-02 taking the uuid as a Kumu::UUID
+template <typename Reader>
+static asdcp_result_t ancillary_resource_count(const Reader* reader, uint32_t* out_count) {
     ASDCP::TimedText::TimedTextDescriptor td;
-    ASDCP::Result_t result = static_cast<ASDCP::TimedText::MXFReader*>(r)->FillTimedTextDescriptor(td);
+    ASDCP::Result_t result = reader->FillTimedTextDescriptor(td);
     if (ASDCP_SUCCESS(result.Value())) {
         *out_count = static_cast<uint32_t>(td.ResourceList.size());
     }
     return result.Value();
 }
 
-asdcp_result_t asdcp_timed_text_reader_ancillary_resource_info(asdcp_timed_text_reader_t r,
-    uint32_t index, uint8_t* out_uuid, int32_t* out_type) {
+template <typename Reader>
+static asdcp_result_t ancillary_resource_info(const Reader* reader, uint32_t index,
+    uint8_t* out_uuid, int32_t* out_type) {
     ASDCP::TimedText::TimedTextDescriptor td;
-    ASDCP::Result_t result = static_cast<ASDCP::TimedText::MXFReader*>(r)->FillTimedTextDescriptor(td);
+    ASDCP::Result_t result = reader->FillTimedTextDescriptor(td);
     if (! ASDCP_SUCCESS(result.Value())) {
         return result.Value();
     }
@@ -1017,14 +1024,15 @@ asdcp_result_t asdcp_timed_text_reader_ancillary_resource_info(asdcp_timed_text_
     return ASDCP::RESULT_OK.Value();
 }
 
-asdcp_result_t asdcp_timed_text_reader_read_ancillary_resource(asdcp_timed_text_reader_t r,
+template <typename Reader>
+static asdcp_result_t read_ancillary_resource(const Reader* reader,
     const uint8_t* resource_uuid, uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
     asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx) {
     // The reader sizes the FrameBuffer to the stream payload, so it must own its
     // memory (SetData'd buffers can't be resized). Read into it, then copy out.
     ASDCP::TimedText::FrameBuffer fb;
     fb.Capacity(buf_capacity);
-    ASDCP::Result_t result = static_cast<ASDCP::TimedText::MXFReader*>(r)->ReadAncillaryResource(
+    ASDCP::Result_t result = reader->ReadAncillaryResource(
         resource_uuid, fb,
         static_cast<ASDCP::AESDecContext*>(dec_ctx),
         static_cast<ASDCP::HMACContext*>(hmac_ctx)
@@ -1040,6 +1048,23 @@ asdcp_result_t asdcp_timed_text_reader_read_ancillary_resource(asdcp_timed_text_
     }
     memcpy(buf, fb.RoData(), fb.Size());
     return result.Value();
+}
+
+asdcp_result_t asdcp_timed_text_reader_ancillary_resource_count(asdcp_timed_text_reader_t r,
+    uint32_t* out_count) {
+    return ancillary_resource_count(static_cast<ASDCP::TimedText::MXFReader*>(r), out_count);
+}
+
+asdcp_result_t asdcp_timed_text_reader_ancillary_resource_info(asdcp_timed_text_reader_t r,
+    uint32_t index, uint8_t* out_uuid, int32_t* out_type) {
+    return ancillary_resource_info(static_cast<ASDCP::TimedText::MXFReader*>(r), index, out_uuid, out_type);
+}
+
+asdcp_result_t asdcp_timed_text_reader_read_ancillary_resource(asdcp_timed_text_reader_t r,
+    const uint8_t* resource_uuid, uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx) {
+    return read_ancillary_resource(static_cast<ASDCP::TimedText::MXFReader*>(r),
+        resource_uuid, buf, buf_capacity, out_size, dec_ctx, hmac_ctx);
 }
 
 /* ---- Atmos Writer ---- */
@@ -2243,6 +2268,19 @@ asdcp_result_t asdcp_as02_timed_text_writer_write_ancillary_resource(asdcp_as02_
     ).Value();
 }
 
+asdcp_result_t asdcp_as02_timed_text_writer_open_write_with_resources(asdcp_as02_timed_text_writer_t w,
+    const char* filename, const asdcp_writer_info_t* info, const asdcp_timed_text_descriptor_t* desc,
+    const uint8_t* resource_uuids, const int32_t* resource_types, uint32_t resource_count,
+    uint32_t header_size) {
+    ASDCP::WriterInfo wi;
+    c_to_cpp_writer_info(info, wi);
+    wi.LabelSetType = ASDCP::LS_MXF_SMPTE;
+    ASDCP::TimedText::TimedTextDescriptor td;
+    c_to_cpp_timed_text_desc(desc, td);
+    declare_timed_text_resources(resource_uuids, resource_types, resource_count, td);
+    return static_cast<AS_02::TimedText::MXFWriter*>(w)->OpenWrite(std::string(filename), wi, td, header_size).Value();
+}
+
 asdcp_result_t asdcp_as02_timed_text_writer_finalize(asdcp_as02_timed_text_writer_t w) {
     return static_cast<AS_02::TimedText::MXFWriter*>(w)->Finalize().Value();
 }
@@ -2303,6 +2341,23 @@ asdcp_result_t asdcp_as02_timed_text_reader_read_timed_text_resource(asdcp_as02_
         *out_size = 0;
     }
     return result.Value();
+}
+
+asdcp_result_t asdcp_as02_timed_text_reader_ancillary_resource_count(asdcp_as02_timed_text_reader_t r,
+    uint32_t* out_count) {
+    return ancillary_resource_count(static_cast<AS_02::TimedText::MXFReader*>(r), out_count);
+}
+
+asdcp_result_t asdcp_as02_timed_text_reader_ancillary_resource_info(asdcp_as02_timed_text_reader_t r,
+    uint32_t index, uint8_t* out_uuid, int32_t* out_type) {
+    return ancillary_resource_info(static_cast<AS_02::TimedText::MXFReader*>(r), index, out_uuid, out_type);
+}
+
+asdcp_result_t asdcp_as02_timed_text_reader_read_ancillary_resource(asdcp_as02_timed_text_reader_t r,
+    const uint8_t* resource_uuid, uint8_t* buf, uint32_t buf_capacity, uint32_t* out_size,
+    asdcp_aes_dec_context_t dec_ctx, asdcp_hmac_context_t hmac_ctx) {
+    return read_ancillary_resource(static_cast<AS_02::TimedText::MXFReader*>(r),
+        resource_uuid, buf, buf_capacity, out_size, dec_ctx, hmac_ctx);
 }
 
 /* ---- AS-02 IAB Writer ---- */

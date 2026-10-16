@@ -2407,7 +2407,7 @@ mod as02_pcm_tests {
 #[cfg(test)]
 mod as02_timed_text_tests {
     use asdcplib::as02::timed_text::*;
-    use asdcplib::timed_text::TimedTextDescriptor;
+    use asdcplib::timed_text::{AncillaryResourceInfo, MimeType, TimedTextDescriptor};
     use asdcplib::{EDIT_RATE_24, WriterInfo};
 
     // minimal ST 2067-2 (IMSC1 / TTML) subtitle document
@@ -2481,6 +2481,87 @@ mod as02_timed_text_tests {
             assert_eq!(&buf[..size], SUBTITLE_XML.as_bytes());
             reader.close().unwrap();
         }
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn test_as02_timed_text_png_resource_reads_back_by_uuid() {
+        let path = crate::util::temp_path("as02-timed-text-png");
+        let path_string = path.to_string_lossy().to_string();
+        let png_uuid = [0x5A; 16];
+        let image_xml = format!(
+            r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:smpte="http://www.smpte-ra.org/schemas/2052-1/2010/smpte-tt"><body>
+<div begin="1s" end="2s" smpte:backgroundImage="urn:uuid:{}"/></body></tt>"#,
+            "5a5a5a5a-5a5a-5a5a-5a5a-5a5a5a5a5a5a"
+        );
+        // stand-in PNG payload, only the bytes have to survive
+        let png: Vec<u8> = b"\x89PNG\r\n\x1a\n"
+            .iter()
+            .copied()
+            .chain((0..70_000u32).map(|i| (i % 253) as u8))
+            .collect();
+        let desc = TimedTextDescriptor {
+            edit_rate: EDIT_RATE_24,
+            container_duration: 48,
+            asset_id: [6; 16],
+            namespace_uri: "http://www.w3.org/ns/ttml/profile/imsc1/image".to_string(),
+            ucs_encoding: "UTF-8".to_string(),
+        };
+
+        {
+            let mut writer = MxfWriter::new();
+            writer
+                .open_write_with_resources(
+                    &path_string,
+                    &WriterInfo::default(),
+                    &desc,
+                    &[AncillaryResourceInfo {
+                        uuid: png_uuid,
+                        mime_type: MimeType::Png,
+                    }],
+                    16_384,
+                )
+                .unwrap();
+            writer
+                .write_timed_text_resource(&image_xml, None, None)
+                .unwrap();
+            writer
+                .write_ancillary_resource(&png, &png_uuid, "image/png", None, None)
+                .unwrap();
+            writer.finalize().unwrap();
+        }
+
+        let mut reader = MxfReader::new();
+        reader.open_read(&path_string).unwrap();
+        assert_eq!(reader.ancillary_resource_count().unwrap(), 1);
+        let resource = reader.ancillary_resource_info(0).unwrap();
+        assert_eq!(resource.uuid, png_uuid);
+        assert_eq!(resource.mime_type, MimeType::Png);
+        assert!(reader.ancillary_resource_info(1).is_err());
+
+        let mut short = vec![0u8; 16];
+        match reader.read_ancillary_resource(&png_uuid, &mut short, None, None) {
+            Err(asdcplib::Error::BufferTooSmall { needed, .. }) => assert_eq!(needed, png.len()),
+            other => panic!("a short buffer must report the size needed, got {other:?}"),
+        }
+        let mut buffer = vec![0u8; png.len()];
+        let size = reader
+            .read_ancillary_resource(&png_uuid, &mut buffer, None, None)
+            .unwrap();
+        assert_eq!(&buffer[..size], png.as_slice());
+        assert!(
+            reader
+                .read_ancillary_resource(&[0x11; 16], &mut buffer, None, None)
+                .is_err()
+        );
+
+        let mut document = vec![0u8; 64 * 1024];
+        let size = reader
+            .read_timed_text_resource(&mut document, None, None)
+            .unwrap();
+        assert_eq!(&document[..size], image_xml.as_bytes());
+        reader.close().unwrap();
 
         std::fs::remove_file(path).unwrap();
     }

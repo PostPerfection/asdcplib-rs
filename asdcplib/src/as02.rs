@@ -946,7 +946,9 @@ pub mod timed_text {
     use crate::WriterInfo;
     use crate::crypto::{AesDecContext, AesEncContext, HmacContext};
     use crate::error::{self, Result};
-    use crate::timed_text::TimedTextDescriptor;
+    use crate::timed_text::{
+        AncillaryResourceInfo, MimeType, TimedTextDescriptor, resource_declarations,
+    };
     use std::ffi::CString;
 
     /// AS-02 Timed Text MXF writer.
@@ -1036,6 +1038,37 @@ pub mod timed_text {
             })
         }
 
+        /// Open for writing, declaring the ancillary resources that will follow.
+        /// The reader can only find resources declared here, and the
+        /// [`write_ancillary_resource`](Self::write_ancillary_resource) calls must
+        /// follow in the same order.
+        pub fn open_write_with_resources(
+            &mut self,
+            filename: &str,
+            info: &WriterInfo,
+            desc: &TimedTextDescriptor,
+            resources: &[AncillaryResourceInfo],
+            header_size: u32,
+        ) -> Result<()> {
+            let cstr =
+                CString::new(filename).map_err(|_| crate::Error::InvalidArgument("null byte"))?;
+            let ffi_info = info.to_ffi();
+            let ffi_desc = desc.to_ffi();
+            let (uuids, types) = resource_declarations(resources);
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_timed_text_writer_open_write_with_resources(
+                    self.ptr,
+                    cstr.as_ptr(),
+                    &ffi_info,
+                    &ffi_desc,
+                    uuids.as_ptr(),
+                    types.as_ptr(),
+                    resources.len() as u32,
+                    header_size,
+                )
+            })
+        }
+
         pub fn finalize(&mut self) -> Result<()> {
             error::check(unsafe { asdcplib_sys::asdcp_as02_timed_text_writer_finalize(self.ptr) })
         }
@@ -1107,6 +1140,70 @@ pub mod timed_text {
             let result = unsafe {
                 asdcplib_sys::asdcp_as02_timed_text_reader_read_timed_text_resource(
                     self.ptr,
+                    buf.as_mut_ptr(),
+                    buf.len() as u32,
+                    &mut out_size,
+                    dec_ptr,
+                    hmac_ptr,
+                )
+            };
+            if result == asdcplib_sys::RESULT_SMALLBUF {
+                return Err(crate::Error::BufferTooSmall {
+                    needed: out_size as usize,
+                    capacity: buf.len(),
+                });
+            }
+            error::check(result)?;
+            Ok(out_size as usize)
+        }
+
+        /// Number of ancillary resources (fonts, images) declared in the header.
+        pub fn ancillary_resource_count(&mut self) -> Result<usize> {
+            let mut count: u32 = 0;
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_timed_text_reader_ancillary_resource_count(
+                    self.ptr, &mut count,
+                )
+            })?;
+            Ok(count as usize)
+        }
+
+        /// UUID and MIME type of the `index`-th ancillary resource.
+        pub fn ancillary_resource_info(&mut self, index: usize) -> Result<AncillaryResourceInfo> {
+            let mut uuid = [0u8; 16];
+            let mut ty: i32 = 0;
+            error::check(unsafe {
+                asdcplib_sys::asdcp_as02_timed_text_reader_ancillary_resource_info(
+                    self.ptr,
+                    index as u32,
+                    uuid.as_mut_ptr(),
+                    &mut ty,
+                )
+            })?;
+            Ok(AncillaryResourceInfo {
+                uuid,
+                mime_type: MimeType::from_i32(ty),
+            })
+        }
+
+        /// Read the ancillary resource identified by `uuid` into `buf`, returning
+        /// the byte count. Discover UUIDs via
+        /// [`ancillary_resource_info`](Self::ancillary_resource_info). A too-small
+        /// buffer yields [`Error::BufferTooSmall`](crate::Error::BufferTooSmall).
+        pub fn read_ancillary_resource(
+            &mut self,
+            uuid: &[u8; 16],
+            buf: &mut [u8],
+            dec_ctx: Option<&mut AesDecContext>,
+            hmac_ctx: Option<&mut HmacContext>,
+        ) -> Result<usize> {
+            let dec_ptr = dec_ctx.map_or(std::ptr::null_mut(), |c| c.as_mut_ptr());
+            let hmac_ptr = hmac_ctx.map_or(std::ptr::null_mut(), |c| c.as_mut_ptr());
+            let mut out_size: u32 = 0;
+            let result = unsafe {
+                asdcplib_sys::asdcp_as02_timed_text_reader_read_ancillary_resource(
+                    self.ptr,
+                    uuid.as_ptr(),
                     buf.as_mut_ptr(),
                     buf.len() as u32,
                     &mut out_size,

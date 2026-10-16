@@ -64,7 +64,7 @@ pub enum MimeType {
 }
 
 impl MimeType {
-    fn from_i32(v: i32) -> Self {
+    pub(crate) fn from_i32(v: i32) -> Self {
         match v {
             1 => MimeType::Png,
             2 => MimeType::OpenType,
@@ -78,6 +78,14 @@ impl MimeType {
 pub struct AncillaryResourceInfo {
     pub uuid: [u8; 16],
     pub mime_type: MimeType,
+}
+
+/// The resource UUIDs packed end to end and their MIME types, the way the
+/// writers' `open_write_with_resources` shims take them.
+pub(crate) fn resource_declarations(resources: &[AncillaryResourceInfo]) -> (Vec<u8>, Vec<i32>) {
+    let uuids = resources.iter().flat_map(|r| r.uuid).collect();
+    let types = resources.iter().map(|r| r.mime_type as i32).collect();
+    (uuids, types)
 }
 
 /// Timed Text MXF writer.
@@ -183,12 +191,7 @@ impl MxfWriter {
             CString::new(filename).map_err(|_| crate::Error::InvalidArgument("null byte"))?;
         let ffi_info = info.to_ffi();
         let ffi_desc = desc.to_ffi();
-        let mut uuids: Vec<u8> = Vec::with_capacity(resources.len() * 16);
-        let mut types: Vec<i32> = Vec::with_capacity(resources.len());
-        for r in resources {
-            uuids.extend_from_slice(&r.uuid);
-            types.push(r.mime_type as i32);
-        }
+        let (uuids, types) = resource_declarations(resources);
         error::check(unsafe {
             asdcplib_sys::asdcp_timed_text_writer_open_write_with_resources(
                 self.ptr,

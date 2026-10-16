@@ -42,6 +42,8 @@ Four items come from the writer rather than from the caller's `AudioDescriptor`:
 
 `timed_text::TimedTextDescriptor` carries `namespace_uri` and `ucs_encoding` beside the edit rate, container duration and asset id. The writer stamps them into the MXF descriptor's `NamespaceURI` and `UCSEncoding`, and the reader reads them back, so an IMF caller can set the IMSC profile designator (e.g. `http://www.w3.org/ns/ttml/profile/imsc1/text`) that Photon requires and repeat it in the CPL EssenceDescriptorList. Both default to the empty string asdcplib wrote before, which Photon rejects.
 
+`as02::timed_text::MxfWriter::open_write_with_resources` declares the ancillary resources (IMSC image profile PNGs, fonts) in the header the way the AS-DCP writer does, because asdcplib's AS-02 reader finds a resource only through the TimedTextResourceSubDescriptor written at open. The reader's `ancillary_resource_count`, `ancillary_resource_info` and `read_ancillary_resource` match the AS-DCP reader's, and both readers share one shim body for each.
+
 ## Testing
 
 68 tests + 1 doctest, byte-exact MXF roundtrips through the real C++ library for all six reader/writer pairs, plus an encrypted (AES + HMAC) JP2K roundtrip. `asdcplib/tests/fixtures` holds real JPEG 2000 codestreams, since a picture descriptor can only be built by parsing one.
