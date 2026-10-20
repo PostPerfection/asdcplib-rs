@@ -11,7 +11,6 @@ const ELEMENT_HEADER_BYTES: usize = ELEMENT_TAG_BYTES + ELEMENT_LENGTH_BYTES;
 const NOT_AN_IA_BITSTREAM_FRAME: &str = "not an IA bitstream frame: a preamble element then a non-empty IA frame element, each a tag byte, a big-endian u32 length and the value";
 
 const INITIAL_FRAME_BUFFER_BYTES: usize = 64 * 1024;
-const LARGEST_FRAME_BUFFER_BYTES: usize = u32::MAX as usize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IabEssenceDescriptor {
@@ -128,6 +127,20 @@ fn frame_has_ia_bitstream_layout(frame: &[u8]) -> bool {
     ia_frame_length > 0 && ia_frame_offset + ELEMENT_HEADER_BYTES + ia_frame_length == frame.len()
 }
 
+// a short-buffer read leaves every element header asdcplib reached at the front of the buffer
+fn frame_bytes_at_least(frame_buffer: &[u8]) -> u64 {
+    let both_headers = 2 * ELEMENT_HEADER_BYTES as u64;
+    let Some(preamble_length) = element_value_length(frame_buffer, 0) else {
+        return both_headers;
+    };
+    let ia_frame_offset = ELEMENT_HEADER_BYTES + preamble_length;
+    let through_preamble = both_headers + preamble_length as u64;
+    match element_value_length(frame_buffer, ia_frame_offset) {
+        Some(ia_frame_length) => through_preamble + ia_frame_length as u64,
+        None => through_preamble,
+    }
+}
+
 pub struct MxfWriter {
     ptr: *mut asdcplib_sys::AsdcpAs02IabWriter,
 }
@@ -210,21 +223,17 @@ impl Drop for MxfWriter {
 pub struct MxfReader {
     ptr: *mut asdcplib_sys::AsdcpAs02IabReader,
     frame_buffer: Vec<u8>,
+    largest_frame_bytes: u32,
 }
 
 unsafe impl Send for MxfReader {}
 
-impl Default for MxfReader {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MxfReader {
-    pub fn new() -> Self {
+    pub fn new(largest_frame_bytes: u32) -> Self {
         Self {
             ptr: unsafe { asdcplib_sys::asdcp_as02_iab_reader_new() },
-            frame_buffer: vec![0; INITIAL_FRAME_BUFFER_BYTES],
+            frame_buffer: vec![0; INITIAL_FRAME_BUFFER_BYTES.min(largest_frame_bytes as usize)],
+            largest_frame_bytes,
         }
     }
 
@@ -284,20 +293,22 @@ impl MxfReader {
                     &mut out_size,
                 )
             };
-            // a short buffer comes back without the size the frame needs
-            if result == asdcplib_sys::RESULT_SMALLBUF
-                && self.frame_buffer.len() < LARGEST_FRAME_BUFFER_BYTES
-            {
-                let grown = self
-                    .frame_buffer
-                    .len()
-                    .saturating_mul(2)
-                    .min(LARGEST_FRAME_BUFFER_BYTES);
-                self.frame_buffer = vec![0; grown];
-                continue;
+            if result != asdcplib_sys::RESULT_SMALLBUF {
+                error::check(result)?;
+                return Ok(&self.frame_buffer[..out_size as usize]);
             }
-            error::check(result)?;
-            return Ok(&self.frame_buffer[..out_size as usize]);
+            let frame_bytes = frame_bytes_at_least(&self.frame_buffer);
+            if frame_bytes > u64::from(self.largest_frame_bytes) {
+                return Err(crate::Error::FrameTooLarge {
+                    frame_bytes,
+                    largest_frame_bytes: self.largest_frame_bytes,
+                });
+            }
+            // a short buffer the element headers do not explain repeats on every retry
+            if frame_bytes <= self.frame_buffer.len() as u64 {
+                return Err(crate::Error::AsdcpError(result));
+            }
+            self.frame_buffer = vec![0; frame_bytes as usize];
         }
     }
 }

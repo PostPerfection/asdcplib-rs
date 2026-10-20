@@ -8,6 +8,7 @@
 #include <MDD.h>
 #include <KM_fileio.h>
 #include <KM_memio.h>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <list>
@@ -2465,9 +2466,43 @@ asdcp_result_t asdcp_as02_iab_writer_finalize(asdcp_as02_iab_writer_t w) {
 }
 
 /* ---- AS-02 IAB Reader ---- */
+/* The bytes a frame read may write, both zero outside a frame read. */
+struct frame_read_bounds {
+    uintptr_t begin;
+    uintptr_t end;
+};
+
+/* ReadFrame adds the element lengths in 32 bits, so a wrapped sum passes its capacity check. */
+class bounded_file_reader : public Kumu::FileReader {
+    const frame_read_bounds& m_Bounds;
+public:
+    explicit bounded_file_reader(const frame_read_bounds& bounds) : m_Bounds(bounds) {}
+    virtual Kumu::Result_t Read(byte_t* buf, ui32_t buf_len, ui32_t* read_count = 0) const {
+        uintptr_t start = reinterpret_cast<uintptr_t>(buf);
+        bool outside_frame = m_Bounds.begin != 0
+            && (start < m_Bounds.begin || start > m_Bounds.end || buf_len > m_Bounds.end - start);
+        if (outside_frame) {
+            return Kumu::RESULT_SMALLBUF;
+        }
+        return Kumu::FileReader::Read(buf, buf_len, read_count);
+    }
+};
+
+class bounded_file_reader_factory : public Kumu::IFileReaderFactory {
+public:
+    frame_read_bounds bounds;
+    bounded_file_reader_factory() {
+        bounds.begin = 0;
+        bounds.end = 0;
+    }
+    virtual Kumu::IFileReader* CreateFileReader() const {
+        return new bounded_file_reader(bounds);
+    }
+};
+
 /* The reader keeps a reference to the factory, and dereferences null when not open. */
 struct as02_iab_reader {
-    Kumu::FileReaderFactory factory;
+    bounded_file_reader_factory factory;
     AS_02::IAB::MXFReader reader;
     bool open;
     as02_iab_reader() : reader(factory), open(false) {}
@@ -2586,7 +2621,11 @@ asdcp_result_t asdcp_as02_iab_reader_read_frame(asdcp_as02_iab_reader_t r, uint3
     /* the Frame overload loses bytes when it grows its own buffer, so read into the caller's */
     ASDCP::FrameBuffer fb;
     fb.SetData(buf, buf_capacity);
+    handle->factory.bounds.begin = reinterpret_cast<uintptr_t>(buf);
+    handle->factory.bounds.end = reinterpret_cast<uintptr_t>(buf) + buf_capacity;
     ASDCP::Result_t result = handle->reader.ReadFrame(frame_number, fb);
+    handle->factory.bounds.begin = 0;
+    handle->factory.bounds.end = 0;
     *out_size = fb.Size();
     return result.Value();
 }

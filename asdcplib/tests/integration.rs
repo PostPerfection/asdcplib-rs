@@ -2571,6 +2571,42 @@ mod as02_iab_tests {
     use asdcplib::as02::iab::*;
     use asdcplib::as02::pcm::SoundfieldGroupProperties;
     use asdcplib::{Rational, WriterInfo};
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    struct LargestAllocationOnThread;
+
+    thread_local! {
+        static LARGEST_ALLOCATION_BYTES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn record_allocation(bytes: usize) {
+        LARGEST_ALLOCATION_BYTES.with(|largest| largest.set(largest.get().max(bytes)));
+    }
+
+    unsafe impl GlobalAlloc for LargestAllocationOnThread {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            record_allocation(layout.size());
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            record_allocation(layout.size());
+            unsafe { System.alloc_zeroed(layout) }
+        }
+
+        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            record_allocation(new_size);
+            unsafe { System.realloc(pointer, layout, new_size) }
+        }
+
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(pointer, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: LargestAllocationOnThread = LargestAllocationOnThread;
 
     // the values Photon's IABEssenceDescriptor checks the track file against
     const IMF_IAB_ESSENCE_CLIP_WRAPPED_CONTAINER: [u8; 16] = [
@@ -2602,6 +2638,8 @@ mod as02_iab_tests {
         denominator: 1,
     };
     const REFERENCE_AUDIO_ALIGNMENT_LEVEL_DBFS: i8 = -20;
+    const LARGEST_FRAME_BYTES: u32 = 1 << 20;
+    const ELEMENT_HEADER_BYTES: usize = 5;
 
     // element values are filler: no real IA bitstream is available
     fn synthetic_ia_bitstream_frame(
@@ -2659,7 +2697,7 @@ mod as02_iab_tests {
             asdcplib::EssenceType::As02Iab
         );
 
-        let mut reader = MxfReader::new();
+        let mut reader = MxfReader::new(LARGEST_FRAME_BYTES);
         reader.open_read(&path_string).unwrap();
         assert_eq!(reader.writer_info().unwrap().asset_uuid, [9; 16]);
         assert_eq!(reader.frame_count().unwrap(), frames.len() as u32);
@@ -2713,6 +2751,101 @@ mod as02_iab_tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    fn write_track(path: &str, frames: &[Vec<u8>]) {
+        let mut writer = open_writer(path);
+        for frame in frames {
+            writer.write_frame(frame).unwrap();
+        }
+        writer.finalize().unwrap();
+    }
+
+    #[test]
+    fn test_as02_iab_reader_refuses_a_frame_over_its_limit_without_allocating_it() {
+        const LIMIT: u32 = 100_000;
+        let path = crate::util::temp_path("as02-iab-over-limit");
+        let path_string = path.to_string_lossy().to_string();
+        let frames = [
+            synthetic_ia_bitstream_frame(10, 20, 1_000),
+            synthetic_ia_bitstream_frame(11, 0, LIMIT as usize - 2 * ELEMENT_HEADER_BYTES),
+            synthetic_ia_bitstream_frame(12, 0, LIMIT as usize - 2 * ELEMENT_HEADER_BYTES + 1),
+        ];
+        write_track(&path_string, &frames);
+
+        let mut reader = MxfReader::new(LIMIT);
+        reader.open_read(&path_string).unwrap();
+        LARGEST_ALLOCATION_BYTES.with(|largest| largest.set(0));
+        let result = reader.read_frame(2).map(<[u8]>::len);
+        let largest_allocation = LARGEST_ALLOCATION_BYTES.with(Cell::get);
+        assert!(
+            matches!(
+                result,
+                Err(asdcplib::Error::FrameTooLarge {
+                    frame_bytes: 100_001,
+                    largest_frame_bytes: LIMIT,
+                })
+            ),
+            "{result:?}"
+        );
+        assert!(
+            largest_allocation <= LIMIT as usize,
+            "allocated {largest_allocation} bytes"
+        );
+        assert_eq!(reader.read_frame(1).unwrap(), frames[1].as_slice());
+        assert_eq!(reader.read_frame(0).unwrap(), frames[0].as_slice());
+        drop(reader);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn overwrite_element_length(file: &mut [u8], frame: &[u8], element_offset: usize) {
+        let frame_start = file
+            .windows(frame.len())
+            .position(|window| window == frame)
+            .unwrap();
+        let length_start = frame_start + element_offset + 1;
+        file[length_start..length_start + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+    }
+
+    // asdcplib adds these lengths in 32 bits, so their sums wrap below the buffer size
+    #[test]
+    fn test_as02_iab_reader_refuses_element_lengths_that_wrap() {
+        let path = crate::util::temp_path("as02-iab-wrapping-lengths");
+        let path_string = path.to_string_lossy().to_string();
+        let frames = [
+            synthetic_ia_bitstream_frame(13, 100, 70_000),
+            synthetic_ia_bitstream_frame(14, 100, 70_000),
+            synthetic_ia_bitstream_frame(15, 3, 100),
+        ];
+        write_track(&path_string, &frames);
+        let mut file = std::fs::read(&path).unwrap();
+        overwrite_element_length(&mut file, &frames[0], 0);
+        overwrite_element_length(&mut file, &frames[1], ELEMENT_HEADER_BYTES + 100);
+        std::fs::write(&path, file).unwrap();
+
+        let mut reader = MxfReader::new(LARGEST_FRAME_BYTES);
+        reader.open_read(&path_string).unwrap();
+        let wrapped_frames = [
+            (0, 2 * ELEMENT_HEADER_BYTES as u64 + u64::from(u32::MAX)),
+            (
+                1,
+                2 * ELEMENT_HEADER_BYTES as u64 + 100 + u64::from(u32::MAX),
+            ),
+        ];
+        for (frame_number, expected_bytes) in wrapped_frames {
+            let result = reader.read_frame(frame_number).map(<[u8]>::len);
+            assert!(
+                matches!(
+                    result,
+                    Err(asdcplib::Error::FrameTooLarge { frame_bytes, .. })
+                        if frame_bytes == expected_bytes
+                ),
+                "frame {frame_number}: {result:?}"
+            );
+        }
+        assert_eq!(reader.read_frame(2).unwrap(), frames[2].as_slice());
+        drop(reader);
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn test_as02_iab_writer_refuses_a_buffer_the_reader_cannot_split() {
         let path = crate::util::temp_path("as02-iab-malformed");
@@ -2738,7 +2871,7 @@ mod as02_iab_tests {
         writer.write_frame(&accepted).unwrap();
         writer.finalize().unwrap();
 
-        let mut reader = MxfReader::new();
+        let mut reader = MxfReader::new(LARGEST_FRAME_BYTES);
         reader.open_read(&path_string).unwrap();
         assert_eq!(reader.frame_count().unwrap(), 1);
         assert_eq!(reader.read_frame(0).unwrap(), accepted.as_slice());
@@ -2763,7 +2896,7 @@ mod as02_iab_tests {
         assert!(writer.write_frame(&frame).is_err());
         assert!(writer.finalize().is_err());
 
-        let mut unopened_reader = MxfReader::new();
+        let mut unopened_reader = MxfReader::new(LARGEST_FRAME_BYTES);
         assert!(unopened_reader.frame_count().is_err());
         assert!(unopened_reader.read_frame(0).is_err());
         assert!(unopened_reader.iab_essence_descriptor().is_err());
@@ -2775,7 +2908,7 @@ mod as02_iab_tests {
         );
         assert!(unopened_reader.frame_count().is_err());
 
-        let mut reader = MxfReader::new();
+        let mut reader = MxfReader::new(LARGEST_FRAME_BYTES);
         reader.open_read(&path_string).unwrap();
         reader.close().unwrap();
         assert!(reader.read_frame(0).is_err());

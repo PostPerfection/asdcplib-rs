@@ -9,6 +9,11 @@ pub enum Error {
     InvalidArgument(&'static str),
     #[error("buffer too small (needed {needed}, had {capacity})")]
     BufferTooSmall { needed: usize, capacity: usize },
+    #[error("frame of at least {frame_bytes} bytes is over the {largest_frame_bytes} byte limit")]
+    FrameTooLarge {
+        frame_bytes: u64,
+        largest_frame_bytes: u32,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
